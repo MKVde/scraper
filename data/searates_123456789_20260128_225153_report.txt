@@ -1,0 +1,24 @@
+======================================================================
+SEARATES TRACKING REPORT
+======================================================================
+
+Reference: 123456789
+Status: Delivered
+Carrier: DHC2
+Route: None → None
+
+VESSELS:
+
+ROUTE EVENTS:
+[1] ○ Milton Keynes, GB: Arrival
+[2] ○ Milton Keynes, GB: Arrival
+[3] ○ Milton Keynes, GB: Arrival
+[4] ○ Milton Keynes, GB: Arrival
+[5] ○ Milton Keynes, GB: Arrival
+[6] ○ Milton Keynes, GB: Arrival
+[7] ○ Milton Keynes, GB: Arrival
+[8] ○ Milton Keynes, GB: Arrival
+[9] ○ Milton Keynes, GB: Arrival
+[10] ○ Milton Keynes, GB: Arrival
+[11] ○ Milton Keynes, GB: Arrival
+[12] ○ Milton Keynes, GB: Arrival
