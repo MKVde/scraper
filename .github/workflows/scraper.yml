@@ -15,6 +15,7 @@ on:
     paths:
       - 'bol_list.txt'
       - 'searates_scraper.py'
+      - 'requirements.txt'
 
 jobs:
   scrape-searates:
@@ -31,6 +32,7 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
+        cache: 'pip'
     
     - name: 🌐 Install Google Chrome
       run: |
@@ -43,7 +45,7 @@ jobs:
     - name: 📦 Install Python dependencies
       run: |
         pip install --upgrade pip
-        pip install seleniumbase beautifulsoup4
+        pip install -r requirements.txt
     
     - name: 🚀 Run SeaRates scraper
       run: python searates_scraper.py
