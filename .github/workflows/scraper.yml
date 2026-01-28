@@ -1,0 +1,72 @@
+name: SeaRates Container Tracker
+
+on:
+  # Schedule - runs automatically (adjust to your timezone)
+  schedule:
+    - cron: '0 3 * * *'   # Daily at 3 AM UTC (6 AM EAT)
+    - cron: '0 15 * * *'  # Daily at 3 PM UTC (6 PM EAT)
+  
+  # Manual trigger - click "Run workflow" button
+  workflow_dispatch:
+  
+  # Trigger on push (for testing)
+  push:
+    branches: [ main ]
+    paths:
+      - 'bol_list.txt'
+      - 'searates_scraper.py'
+
+jobs:
+  scrape-searates:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write  # Allow pushing results back to repo
+    
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: 🐍 Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: 🌐 Install Google Chrome
+      run: |
+        wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+        sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq google-chrome-stable
+        google-chrome --version
+    
+    - name: 📦 Install Python dependencies
+      run: |
+        pip install --upgrade pip
+        pip install seleniumbase beautifulsoup4
+    
+    - name: 🚀 Run SeaRates scraper
+      run: python searates_scraper.py
+    
+    - name: 💾 Commit and push results
+      run: |
+        git config user.name "SeaRates Bot"
+        git config user.email "bot@searates-scraper.github.io"
+        git add data/
+        git diff --quiet && git diff --staged --quiet || git commit -m "📊 Auto-update: Scraping results $(date +'%Y-%m-%d %H:%M:%S UTC')"
+        git push
+    
+    - name: 📤 Upload artifacts (90-day retention)
+      uses: actions/upload-artifact@v4
+      with:
+        name: scraping-results-${{ github.run_number }}
+        path: |
+          data/*.json
+          data/*.txt
+          data/*.png
+        retention-days: 90
+    
+    - name: 📧 Notify on failure
+      if: failure()
+      run: echo "⚠️ Scraping failed! Check the logs above."
