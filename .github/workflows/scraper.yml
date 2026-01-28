@@ -1,13 +1,21 @@
 name: SeaRates Container Tracker
 
 on:
-  # Schedule - runs automatically (adjust to your timezone)
+  # Schedule - runs every 3 days at 3 AM UTC
   schedule:
-    - cron: '0 3 * * *'   # Daily at 3 AM UTC (6 AM EAT)
-    - cron: '0 15 * * *'  # Daily at 3 PM UTC (6 PM EAT)
+    - cron: '0 3 */3 * *'  # Every 3 days at 3 AM UTC
+  
+  # API Trigger - from PHP app when BOL is submitted
+  repository_dispatch:
+    types: [track_bol]
   
   # Manual trigger - click "Run workflow" button
   workflow_dispatch:
+    inputs:
+      bol_number:
+        description: 'BOL number to track (leave empty to use bol_list.txt)'
+        required: false
+        type: string
   
   # Trigger on push (for testing)
   push:
@@ -27,6 +35,18 @@ jobs:
     steps:
     - name: 📥 Checkout repository
       uses: actions/checkout@v4
+    
+    - name: 📝 Prepare BOL list (API trigger)
+      if: github.event_name == 'repository_dispatch'
+      run: |
+        echo "Triggered via API for BOL: ${{ github.event.client_payload.bol }}"
+        echo "${{ github.event.client_payload.bol }}" > bol_list.txt
+    
+    - name: 📝 Prepare BOL list (Manual trigger)
+      if: github.event_name == 'workflow_dispatch' && github.event.inputs.bol_number != ''
+      run: |
+        echo "Manual trigger for BOL: ${{ github.event.inputs.bol_number }}"
+        echo "${{ github.event.inputs.bol_number }}" > bol_list.txt
     
     - name: 🐍 Set up Python 3.11
       uses: actions/setup-python@v5
@@ -50,6 +70,38 @@ jobs:
     - name: 🚀 Run SeaRates scraper
       run: python searates_scraper.py
     
+    - name: 📡 Send results to PHP API
+      if: success()
+      env:
+        PHP_API_URL: ${{ secrets.PHP_API_URL }}
+        PHP_API_KEY: ${{ secrets.PHP_API_KEY }}
+      run: |
+        # Find the most recent JSON file
+        LATEST_JSON=$(ls -t data/searates_*.json 2>/dev/null | head -1)
+        
+        if [ -n "$LATEST_JSON" ] && [ -n "$PHP_API_URL" ] && [ -n "$PHP_API_KEY" ]; then
+          echo "📤 Sending $LATEST_JSON to PHP API..."
+          
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$PHP_API_URL" \
+            -H "X-API-KEY: $PHP_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d @"$LATEST_JSON")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+          
+          echo "Response: $BODY"
+          echo "HTTP Code: $HTTP_CODE"
+          
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "⚠️ API returned non-200 status"
+          else
+            echo "✅ Data sent successfully!"
+          fi
+        else
+          echo "⚠️ Skipping API callback (missing JSON, URL, or API key)"
+        fi
+    
     - name: 💾 Commit and push results
       run: |
         git config user.name "SeaRates Bot"
@@ -71,3 +123,4 @@ jobs:
     - name: 📧 Notify on failure
       if: failure()
       run: echo "⚠️ Scraping failed! Check the logs above."
+
