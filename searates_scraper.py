@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
+
 """
 SeaRates Scraper for GitHub Actions
-Automated container tracking with Cloudflare bypass
+Automated container tracking with Cloudflare bypass + API Response Capture
 """
 
 import os
@@ -13,15 +14,13 @@ import json
 from datetime import datetime
 import re
 
-
 class SeaRatesScraper:
     def __init__(self):
         """Initialize with UC Mode enabled"""
         self.sb = None
-        
+
     def track_bol(self, bol_number, sealine="AUTO"):
         """Track shipment bypassing Cloudflare"""
-        
         # Use xvfb for virtual display in GitHub Actions
         with SB(uc=True, headless=True, xvfb=True) as sb:
             self.sb = sb
@@ -34,22 +33,22 @@ class SeaRatesScraper:
                 
                 url = f"https://www.searates.com/container/tracking/?number={bol_number}&sealine={sealine}&shipment-type=sea"
                 
-                print("[1/7] Opening page with Cloudflare bypass...")
+                print("[1/8] Opening page with Cloudflare bypass...")
                 sb.uc_open_with_reconnect(url, reconnect_time=4)
                 
-                print("[2/7] Bypassing Cloudflare challenge...")
+                print("[2/8] Bypassing Cloudflare challenge...")
                 sb.uc_gui_click_captcha()
                 sb.sleep(3)
                 
-                print("[3/7] Waiting for tracking data...")
+                print("[3/8] Waiting for tracking data...")
                 sb.sleep(5)
                 
                 # Extract basic data
-                print("[3/7] Extracting basic tracking information...")
+                print("[4/8] Extracting basic tracking information...")
                 tracking_data = self._extract_basic_data(sb)
                 
                 # Click Vessel tab
-                print("\n[4/7] Switching to Vessel tab...")
+                print("\n[5/8] Switching to Vessel tab...")
                 try:
                     sb.uc_click(f"[data-test-id='openedCard-vessels-tab-{bol_number}']", reconnect_time=2)
                     sb.sleep(3)
@@ -58,7 +57,7 @@ class SeaRatesScraper:
                     print(f"⚠ Could not access Vessel tab: {e}")
                 
                 # Click Containers tab
-                print("\n[5/7] Switching to Containers tab...")
+                print("\n[6/8] Switching to Containers tab...")
                 try:
                     sb.uc_click(f"[data-test-id='openedCard-containers-tab-{bol_number}']", reconnect_time=2)
                     sb.sleep(3)
@@ -67,7 +66,7 @@ class SeaRatesScraper:
                     print(f"⚠ Could not access Containers tab: {e}")
                 
                 # Return to Route tab
-                print("\n[6/7] Returning to Route tab...")
+                print("\n[7/8] Returning to Route tab...")
                 try:
                     sb.uc_click(f"[data-test-id='openedCard-routes-tab-{bol_number}']", reconnect_time=2)
                     sb.sleep(2)
@@ -75,7 +74,7 @@ class SeaRatesScraper:
                     pass
                 
                 # Screenshot
-                print("[7/7] Taking screenshot...")
+                print("[8/8] Taking screenshot...")
                 screenshot = f"searates_{bol_number}_{int(time.time())}.png"
                 sb.save_screenshot(screenshot)
                 tracking_data['screenshot'] = screenshot
@@ -93,7 +92,141 @@ class SeaRatesScraper:
                 except:
                     pass
                 return {'error': str(e), 'screenshot': screenshot}
-    
+
+    def capture_api_response(self, bol_number, sealine="AUTO"):
+        """
+        Capture XHR API response from tracking-system/reverse/tracking endpoint
+        Uses Chrome DevTools Protocol (CDP) to intercept network requests
+        """
+        print(f"\n{'='*70}")
+        print(f"CAPTURING API RESPONSE: {bol_number}")
+        print(f"{'='*70}\n")
+        
+        # Enable performance logging for CDP
+        from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+        
+        caps = DesiredCapabilities.CHROME.copy()
+        caps['goog:loggingPrefs'] = {'performance': 'ALL'}
+        
+        with SB(uc=True, headless=True, xvfb=True, chromium_arg="--enable-logging --v=1") as sb:
+            try:
+                # Enable performance logging
+                sb.driver.execute_cdp_cmd('Network.enable', {})
+                
+                url = f"https://www.searates.com/container/tracking/?number={bol_number}&sealine={sealine}&shipment-type=sea"
+                
+                print("[1/4] Opening tracking page...")
+                sb.uc_open_with_reconnect(url, reconnect_time=4)
+                
+                print("[2/4] Bypassing Cloudflare...")
+                sb.uc_gui_click_captcha()
+                sb.sleep(3)
+                
+                print("[3/4] Waiting for API calls...")
+                sb.sleep(8)  # Wait for all API calls
+                
+                print("[4/4] Extracting API response...")
+                
+                # Target API endpoint pattern
+                target_pattern = f"tracking-system/reverse/tracking"
+                
+                # Get performance logs
+                logs = sb.driver.get_log('performance')
+                
+                target_request_id = None
+                found_url = None
+                
+                # Find the API request
+                for log in logs:
+                    try:
+                        message = json.loads(log['message'])['message']
+                        
+                        if message.get('method') == 'Network.responseReceived':
+                            params = message['params']
+                            response = params['response']
+                            response_url = response['url']
+                            
+                            # Check if this matches our target API
+                            if (target_pattern in response_url and 
+                                f"number={bol_number}" in response_url and 
+                                "sealine=AUTO" in response_url):
+                                
+                                if response.get('status') == 200:
+                                    target_request_id = params['requestId']
+                                    found_url = response_url
+                                    print(f"✓ Found API: {response_url}")
+                                    break
+                    except:
+                        continue
+                
+                # Get response body
+                if target_request_id:
+                    try:
+                        response_body = sb.driver.execute_cdp_cmd('Network.getResponseBody', {
+                            'requestId': target_request_id
+                        })
+                        
+                        body_content = response_body.get('body', '')
+                        api_data = json.loads(body_content)
+                        
+                        # Validate response
+                        if api_data.get('status') == 'success':
+                            print(f"✓ API Response captured successfully!")
+                            metadata = api_data.get('data', {}).get('metadata', {})
+                            print(f"  - Tracking: {metadata.get('number')}")
+                            print(f"  - Line: {metadata.get('sealine_name')}")
+                            print(f"  - Status: {metadata.get('status')}")
+                            print(f"  - Containers: {len(api_data.get('data', {}).get('containers', []))}")
+                            
+                            return {
+                                'success': True,
+                                'api_url': found_url,
+                                'data': api_data,
+                                'captured_at': datetime.now().isoformat()
+                            }
+                        else:
+                            print(f"⚠ API returned non-success status: {api_data.get('status')}")
+                            return {
+                                'success': False,
+                                'error': 'Non-success API status',
+                                'data': api_data
+                            }
+                            
+                    except Exception as e:
+                        print(f"✗ Error extracting API response: {e}")
+                        return {
+                            'success': False,
+                            'error': str(e)
+                        }
+                else:
+                    print("✗ Target API endpoint not found")
+                    
+                    # Debug: Show captured URLs
+                    print("\n[DEBUG] Captured tracking-related URLs:")
+                    for log in logs[:50]:
+                        try:
+                            message = json.loads(log['message'])['message']
+                            if message.get('method') == 'Network.responseReceived':
+                                url = message['params']['response']['url']
+                                if 'tracking' in url.lower():
+                                    print(f"  - {url}")
+                        except:
+                            continue
+                    
+                    return {
+                        'success': False,
+                        'error': 'API endpoint not found'
+                    }
+                    
+            except Exception as e:
+                print(f"✗ Unexpected error: {e}")
+                import traceback
+                traceback.print_exc()
+                return {
+                    'success': False,
+                    'error': str(e)
+                }
+
     def _extract_basic_data(self, sb):
         """Extract all basic tracking information"""
         soup = BeautifulSoup(sb.get_page_source(), 'html.parser')
@@ -122,26 +255,27 @@ class SeaRatesScraper:
         ref_elem = soup.find(attrs={'data-reference': True})
         if ref_elem:
             data['reference_number'] = ref_elem.get('data-reference')
-            print(f"  ✓ Reference: {data['reference_number']}")
+            print(f"   ✓ Reference: {data['reference_number']}")
         
         # Extract reference type
         type_elem = soup.find(attrs={'data-test-id': 'card-reference-type'})
         if type_elem:
             data['reference_type'] = type_elem.get_text(strip=True)
-            print(f"  ✓ Type: {data['reference_type']}")
+            print(f"   ✓ Type: {data['reference_type']}")
         
         # Extract status
         status_elem = soup.find(attrs={'data-test-id': re.compile(r'card-status-')})
         if status_elem:
             data['status'] = status_elem.get_text(strip=True)
-            print(f"  ✓ Status: {data['status']}")
+            print(f"   ✓ Status: {data['status']}")
         
         # Extract carrier
         carrier_img = soup.find('img', class_=re.compile(r'.*RhAQya.*'))
         if carrier_img and carrier_img.get('alt'):
             data['carrier'] = carrier_img.get('alt')
-            print(f"  ✓ Carrier: {data['carrier']}")
+            print(f"   ✓ Carrier: {data['carrier']}")
         
+        # [Rest of the extraction code remains the same...]
         # Extract container count and type
         container_info = soup.find('div', class_=re.compile(r'.*NVumUP.*'))
         if container_info:
@@ -152,30 +286,28 @@ class SeaRatesScraper:
             type_match = re.search(r"x\s*(.+)", text)
             if type_match:
                 data['container_type'] = type_match.group(1).strip()
-            print(f"  ✓ Containers: {data['container_count']} x {data['container_type']}")
+            print(f"   ✓ Containers: {data['container_count']} x {data['container_type']}")
         
         # Extract origin
         origin_elem = soup.find(attrs={'data-test-id': re.compile(r'card-direction-from-')})
         if origin_elem:
             data['origin'] = origin_elem.get_text(strip=True)
-            print(f"  ✓ Origin: {data['origin']}")
+            print(f"   ✓ Origin: {data['origin']}")
         
         # Extract destination
         dest_elem = soup.find(attrs={'data-test-id': re.compile(r'card-direction-to-')})
         if dest_elem:
             data['destination'] = dest_elem.get_text(strip=True)
-            print(f"  ✓ Destination: {data['destination']}")
+            print(f"   ✓ Destination: {data['destination']}")
         
         # Extract coordinates
         coord_from = soup.find('input', attrs={'name': 'coord_from'})
         coord_to = soup.find('input', attrs={'name': 'coord_to'})
-        
         if coord_from and coord_from.get('value'):
             try:
                 data['coordinates']['from'] = json.loads(coord_from.get('value'))
             except:
                 pass
-        
         if coord_to and coord_to.get('value'):
             try:
                 data['coordinates']['to'] = json.loads(coord_to.get('value'))
@@ -197,48 +329,48 @@ class SeaRatesScraper:
                 elif 'ETA' in text:
                     data['estimated_arrival'] = text.replace('ETA', '').strip()
         
-        print(f"  ✓ Departure: {data['actual_departure'] or data['estimated_departure'] or 'N/A'}")
-        print(f"  ✓ Arrival: {data['actual_arrival'] or data['estimated_arrival'] or 'N/A'}")
+        print(f"   ✓ Departure: {data['actual_departure'] or data['estimated_departure'] or 'N/A'}")
+        print(f"   ✓ Arrival: {data['actual_arrival'] or data['estimated_arrival'] or 'N/A'}")
         
         # Extract route events
         self._extract_route_events(soup, data)
         
         return data
-    
+
     def _extract_route_events(self, soup, data):
         """Extract route events timeline"""
         location_blocks = soup.find_all('div', class_=re.compile(r'.*CL5ccK.*'))
         
         if location_blocks:
-            print(f"\n  ✓ Found {len(location_blocks)} location(s) in Route:")
-        
-        for block in location_blocks:
-            location_elem = block.find('div', class_=re.compile(r'.*XMtlrn.*'))
-            if not location_elem:
-                continue
+            print(f"\n   ✓ Found {len(location_blocks)} location(s) in Route:")
             
-            location = location_elem.get_text(strip=True)
-            event_containers = block.find_all('div', class_=re.compile(r'.*WJvyRD.*'))
-            
-            if len(event_containers) >= 2:
-                descriptions_div = event_containers[0]
-                timestamps_div = event_containers[1]
+            for block in location_blocks:
+                location_elem = block.find('div', class_=re.compile(r'.*XMtlrn.*'))
+                if not location_elem:
+                    continue
                 
-                event_descs = descriptions_div.find_all('div', class_=re.compile(r'.*jKvQbb.*'))
-                timestamps = timestamps_div.find_all('div', class_=re.compile(r'.*jKvQbb.*'))
+                location = location_elem.get_text(strip=True)
+                event_containers = block.find_all('div', class_=re.compile(r'.*WJvyRD.*'))
                 
-                for idx, desc_elem in enumerate(event_descs):
-                    event = {
-                        'location': location,
-                        'description': desc_elem.get_text(strip=True),
-                        'timestamp': timestamps[idx].get_text(strip=True) if idx < len(timestamps) else None,
-                        'is_completed': 'SbA_5C' in desc_elem.get('class', [])
-                    }
-                    data['route_events'].append(event)
+                if len(event_containers) >= 2:
+                    descriptions_div = event_containers[0]
+                    timestamps_div = event_containers[1]
                     
-                    status_icon = "✓" if event['is_completed'] else "○"
-                    print(f"    {status_icon} {location}: {event['description']} - {event['timestamp'] or 'Pending'}")
-    
+                    event_descs = descriptions_div.find_all('div', class_=re.compile(r'.*jKvQbb.*'))
+                    timestamps = timestamps_div.find_all('div', class_=re.compile(r'.*jKvQbb.*'))
+                    
+                    for idx, desc_elem in enumerate(event_descs):
+                        event = {
+                            'location': location,
+                            'description': desc_elem.get_text(strip=True),
+                            'timestamp': timestamps[idx].get_text(strip=True) if idx < len(timestamps) else None,
+                            'is_completed': 'SbA_5C' in desc_elem.get('class', [])
+                        }
+                        
+                        data['route_events'].append(event)
+                        status_icon = "✓" if event['is_completed'] else "○"
+                        print(f"     {status_icon} {location}: {event['description']} - {event['timestamp'] or 'Pending'}")
+
     def _extract_vessel_data(self, sb, data):
         """Extract vessel information"""
         soup = BeautifulSoup(sb.get_page_source(), 'html.parser')
@@ -254,7 +386,6 @@ class SeaRatesScraper:
             }
             
             fields = vessel_block.find_all('div', class_=re.compile(r'.*V3_o9s.*'))
-            
             for field in fields:
                 label_elem = field.find('div', class_=re.compile(r'.*HKyeYq.*'))
                 value_elem = field.find('div', class_=re.compile(r'.*BGIaYF.*'))
@@ -268,17 +399,17 @@ class SeaRatesScraper:
                         'Loading': 'loading_port', 'Discharge': 'discharge_port',
                         'ATD': 'atd', 'ATA': 'ata', 'ETD': 'etd', 'ETA': 'eta'
                     }
+                    
                     if label in mapping:
                         vessel[mapping[label]] = value
             
             data['vessels'].append(vessel)
-            
-            print(f"  [{idx}] Vessel: {vessel['vessel_name']}")
-            print(f"      Voyage: {vessel['voyage']}")
-            print(f"      Route: {vessel['loading_port']} → {vessel['discharge_port']}")
-            print(f"      Departure: {vessel['atd'] or vessel['etd'] or 'N/A'}")
-            print(f"      Arrival: {vessel['ata'] or vessel['eta'] or 'N/A'}\n")
-    
+            print(f"   [{idx}] Vessel: {vessel['vessel_name']}")
+            print(f"       Voyage: {vessel['voyage']}")
+            print(f"       Route: {vessel['loading_port']} → {vessel['discharge_port']}")
+            print(f"       Departure: {vessel['atd'] or vessel['etd'] or 'N/A'}")
+            print(f"       Arrival: {vessel['ata'] or vessel['eta'] or 'N/A'}\n")
+
     def _extract_containers_data(self, sb, data):
         """Extract container information"""
         soup = BeautifulSoup(sb.get_page_source(), 'html.parser')
@@ -292,15 +423,15 @@ class SeaRatesScraper:
                     'container_number': container_num.strip(),
                     'type': None, 'size': None, 'status': None
                 }
+                
                 data['containers'].append(container)
-                print(f"  [{idx}] Container: {container['container_number']}")
+                print(f"   [{idx}] Container: {container['container_number']}")
         else:
             print("⚠ No individual container details found")
 
 
 def save_results(data, filename='searates_tracking'):
     """Save results to JSON and TXT"""
-    
     # Create data directory
     os.makedirs('data', exist_ok=True)
     
@@ -314,6 +445,7 @@ def save_results(data, filename='searates_tracking'):
         f.write("="*70 + "\n")
         f.write("SEARATES TRACKING REPORT\n")
         f.write("="*70 + "\n\n")
+        
         f.write(f"Reference: {data.get('reference_number', 'N/A')}\n")
         f.write(f"Status: {data.get('status', 'N/A')}\n")
         f.write(f"Carrier: {data.get('carrier', 'N/A')}\n")
@@ -338,10 +470,10 @@ def main():
             bol_numbers = [line.strip() for line in f if line.strip() and not line.startswith('#')]
     except FileNotFoundError:
         print("⚠ bol_list.txt not found, using default BOL")
-        bol_numbers = ["DXB500681500"]
+        bol_numbers = ["3100124492"]
     
     print("\n" + "="*70)
-    print("SEARATES SCRAPER - CLOUDFLARE BYPASS (GitHub Actions)")
+    print("SEARATES SCRAPER - CLOUDFLARE BYPASS + API CAPTURE")
     print("="*70)
     print(f"Processing {len(bol_numbers)} BOL number(s)\n")
     
@@ -349,6 +481,9 @@ def main():
     all_results = []
     
     for bol in bol_numbers:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Step 1: Scrape HTML data
         results = scraper.track_bol(bol, "AUTO")
         
         if 'error' not in results:
@@ -362,10 +497,32 @@ def main():
             print(f"Vessels: {len(results.get('vessels', []))}")
             print(f"Events: {len(results.get('route_events', []))}")
             
-            save_results(results, f"searates_{bol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
-            all_results.append(results)
+            # Save HTML-scraped data
+            save_results(results, f"searates_html_{bol}_{timestamp}")
             
+            # Step 2: Capture API response
+            print("\n" + "="*70)
+            print("STEP 2: CAPTURING API RESPONSE")
+            print("="*70)
+            
+            api_response = scraper.capture_api_response(bol, "AUTO")
+            
+            if api_response.get('success'):
+                # Save API response separately
+                api_filename = f"data/searates_api_{bol}_{timestamp}.json"
+                with open(api_filename, 'w', encoding='utf-8') as f:
+                    json.dump(api_response, f, indent=2, ensure_ascii=False)
+                print(f"\n✓ API Response saved: {api_filename}")
+                
+                # Add API data to results
+                results['api_response'] = api_response
+            else:
+                print(f"\n⚠ Could not capture API response: {api_response.get('error')}")
+                results['api_response'] = api_response
+            
+            all_results.append(results)
             print("\n✓ SCRAPING COMPLETED!")
+            
         else:
             print(f"\n❌ Failed: {bol} - {results['error']}")
             all_results.append(results)
