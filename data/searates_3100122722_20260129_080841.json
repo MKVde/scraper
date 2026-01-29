@@ -1,0 +1,93 @@
+{
+  "reference_number": null,
+  "reference_type": null,
+  "status": null,
+  "carrier": null,
+  "container_count": 0,
+  "container_type": null,
+  "origin": null,
+  "destination": null,
+  "actual_departure": null,
+  "actual_arrival": null,
+  "estimated_departure": null,
+  "estimated_arrival": null,
+  "coordinates": {
+    "from": null,
+    "to": null
+  },
+  "route_events": [],
+  "vessels": [
+    {
+      "vessel_name": "GFS PRECIOUS",
+      "voyage": "0046",
+      "loading_port": "Dubai, AE",
+      "discharge_port": "Jeddah, SA",
+      "atd": "11 Jan 2026",
+      "ata": "20 Jan 2026",
+      "etd": null,
+      "eta": null
+    },
+    {
+      "vessel_name": "SAFEEN PRESTIGE",
+      "voyage": "0005",
+      "loading_port": "Jeddah, SA",
+      "discharge_port": "Doraleh Container Terminal, DJ",
+      "atd": "23 Jan 2026",
+      "ata": "25 Jan 2026",
+      "etd": null,
+      "eta": null
+    }
+  ],
+  "containers": [
+    {
+      "container_number": "VSBU2059102",
+      "type": null,
+      "size": null,
+      "status": null
+    },
+    {
+      "container_number": "CAIU6553010",
+      "type": null,
+      "size": null,
+      "status": null
+    },
+    {
+      "container_number": "VOLU2910180",
+      "type": null,
+      "size": null,
+      "status": null
+    },
+    {
+      "container_number": "BXAU2030231",
+      "type": null,
+      "size": null,
+      "status": null
+    },
+    {
+      "container_number": "VOLU2133270",
+      "type": null,
+      "size": null,
+      "status": null
+    },
+    {
+      "container_number": "UETU2918086",
+      "type": null,
+      "size": null,
+      "status": null
+    },
+    {
+      "container_number": "SLVU3001475",
+      "type": null,
+      "size": null,
+      "status": null
+    },
+    {
+      "container_number": "MOAU0707650",
+      "type": null,
+      "size": null,
+      "status": null
+    }
+  ],
+  "scraped_at": "2026-01-29T08:08:23.535102",
+  "screenshot": "searates_3100122722_1769674121.png"
+}
