@@ -1,0 +1,18 @@
+======================================================================
+SEARATES TRACKING REPORT
+======================================================================
+
+Reference: 3100124159
+Status: In transit
+Carrier: SJHH
+Route: Jebel Ali, AE → Djibouti, DJ
+
+VESSELS:
+[1] SSF DYNAMIC - Voyage 0012
+[2] FEEDER - Voyage JEDJIB2604
+
+ROUTE EVENTS:
+[1] ○ Jebel Ali, AE: Vessel departure from first POL
+[2] ○ Jeddah, SA: Vessel arrival at T/S port
+[3] ○ Jeddah, SA: Vessel departure from T/S
+[4] ○ Djibouti, DJ: Vessel arrival at final POD
