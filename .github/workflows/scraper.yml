@@ -62,53 +62,78 @@ jobs:
       - name: 🚀 Run SeaRates scraper
         run: python searates_scraper.py
       
-      - name: 📡 Send results to PHP API
+      - name: 📡 Send HTML data to PHP API
         if: success()
         env:
           PHP_API_URL: ${{ secrets.PHP_API_URL }}
           PHP_API_KEY: ${{ secrets.PHP_API_KEY }}
         run: |
-          # Send both HTML and API JSON files
-          for JSON_FILE in data/searates_*.json; do
-            if [ -f "$JSON_FILE" ]; then
-              echo "📤 Sending $JSON_FILE to PHP API..."
-              
-              RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$PHP_API_URL" \
-                -H "X-API-KEY: $PHP_API_KEY" \
-                -H "Content-Type: application/json" \
-                -d @"$JSON_FILE")
-              
-              HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-              BODY=$(echo "$RESPONSE" | head -n -1)
-              
-              echo "Response: $BODY"
-              echo "HTTP Code: $HTTP_CODE"
-              
-              if [ "$HTTP_CODE" != "200" ]; then
-                echo "⚠️ API returned non-200 status for $JSON_FILE"
-              else
-                echo "✅ $JSON_FILE sent successfully!"
-              fi
-            fi
-          done
-          
-          if [ ! -f data/searates_*.json ]; then
-            echo "⚠️ No JSON files found, skipping API callback"
+          # Check if API credentials are configured
+          if [ -z "$PHP_API_URL" ] || [ -z "$PHP_API_KEY" ]; then
+            echo "⚠️ API credentials not configured, skipping API callback"
+            exit 0
           fi
+          
+          # Find latest HTML-scraped file
+          LATEST_HTML=$(ls -t data/searates_html_*.json 2>/dev/null | head -1)
+          
+          if [ -z "$LATEST_HTML" ]; then
+            echo "⚠️ No HTML-scraped JSON file found"
+            exit 0
+          fi
+          
+          echo "=================================================="
+          echo "📤 SENDING HTML DATA TO PHP API"
+          echo "=================================================="
+          echo "File: $(basename $LATEST_HTML)"
+          echo ""
+          
+          # Send to PHP API
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$PHP_API_URL" \
+            -H "X-API-KEY: $PHP_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d @"$LATEST_HTML")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+          
+          echo "Response: $BODY"
+          echo "HTTP Code: $HTTP_CODE"
+          echo ""
+          
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ HTML data sent successfully to PHP API!"
+          else
+            echo "⚠️ API returned status: $HTTP_CODE"
+          fi
+          
+          echo "=================================================="
+          echo ""
+          echo "ℹ️  API JSON files saved in repo for reference only"
+          
+          # List API files (for logging)
+          API_FILES=$(ls -t data/searates_api_*.json 2>/dev/null)
+          if [ -n "$API_FILES" ]; then
+            echo "📁 API Response files in repo:"
+            for file in $API_FILES; do
+              echo "   - $(basename $file)"
+            done
+          fi
+          echo "=================================================="
       
       - name: 💾 Commit and push results
         run: |
           git config user.name "SeaRates Bot"
           git config user.email "bot@searates-scraper.github.io"
           
-          # Pull latest changes with rebase to avoid conflicts
+          # Pull latest changes with rebase
           echo "🔄 Pulling latest changes..."
           git pull --rebase origin main || echo "⚠️ Pull failed or no remote changes"
           
-          # Add all data files and screenshots
+          # Add data directory and screenshots
           git add data/ *.png 2>/dev/null || true
           
-          # Check if there are changes to commit
+          # Check if there are changes
           if git diff --quiet && git diff --staged --quiet; then
             echo "ℹ️ No changes to commit"
           else
@@ -117,9 +142,13 @@ jobs:
             # Get BOL number for commit message
             BOL_NUM=$(cat bol_list.txt 2>/dev/null | head -1 | tr -d '\n' || echo "unknown")
             
-            git commit -m "📊 Auto-update: $(date +'%Y-%m-%d %H:%M:%S UTC') [BOL: $BOL_NUM]"
+            # Count files
+            HTML_COUNT=$(ls data/searates_html_*.json 2>/dev/null | wc -l)
+            API_COUNT=$(ls data/searates_api_*.json 2>/dev/null | wc -l)
             
-            # Push with retry logic (max 3 attempts)
+            git commit -m "📊 Auto-update: $(date +'%Y-%m-%d %H:%M:%S UTC') [BOL: $BOL_NUM] (HTML: $HTML_COUNT, API: $API_COUNT)"
+            
+            # Push with retry logic
             MAX_RETRIES=3
             RETRY_COUNT=0
             PUSH_SUCCESS=false
@@ -134,25 +163,24 @@ jobs:
                 break
               else
                 if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                  echo "⚠️ Push failed, pulling and retrying in 5 seconds..."
+                  echo "⚠️ Push failed, retrying in 5 seconds..."
                   sleep 5
-                  git pull --rebase origin main || echo "⚠️ Pull failed"
+                  git pull --rebase origin main || echo "⚠️ Rebase failed"
                 else
                   echo "❌ Failed to push after $MAX_RETRIES attempts"
                 fi
               fi
             done
             
-            # Exit with error if push failed
             if [ "$PUSH_SUCCESS" = false ]; then
-              echo "💡 Tip: Check if another workflow is running simultaneously"
+              echo "💡 Tip: Check if another workflow is running"
               exit 1
             fi
           fi
       
       - name: 📤 Upload artifacts
         uses: actions/upload-artifact@v4
-        if: always()  # Upload even if push fails
+        if: always()
         with:
           name: scraping-results-${{ github.run_number }}
           path: |
@@ -165,7 +193,3 @@ jobs:
         run: |
           echo "⚠️ Scraping workflow failed!"
           echo "Check the logs above for details."
-          echo "Common issues:"
-          echo "  - Cloudflare blocking"
-          echo "  - Git push conflicts"
-          echo "  - Network timeout"
