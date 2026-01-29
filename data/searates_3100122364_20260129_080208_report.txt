@@ -1,0 +1,20 @@
+======================================================================
+SEARATES TRACKING REPORT
+======================================================================
+
+Reference: 3100122364
+Status: In transit
+Carrier: SJHH
+Route: Jebel Ali, AE → Djibouti, DJ
+
+VESSELS:
+[1] GFS PRECIOUS - Voyage 0046
+[2] SAFEEN PRESTIGE - Voyage 0005
+
+ROUTE EVENTS:
+[1] ○ Jebel Ali, AE: Gate Out
+[2] ○ Dubai, AE: Gate In
+[3] ○ Dubai, AE: Loaded
+[4] ○ Jeddah, SA: Discharged
+[5] ○ Jeddah, SA: Loaded
+[6] ○ Doraleh Container Terminal, DJ: Discharged
