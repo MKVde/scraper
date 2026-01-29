@@ -1,0 +1,23 @@
+{
+  "reference_number": "BK-2026-008",
+  "reference_type": null,
+  "status": "Unknown",
+  "carrier": "AUTO",
+  "container_count": 0,
+  "container_type": null,
+  "origin": null,
+  "destination": null,
+  "actual_departure": null,
+  "actual_arrival": null,
+  "estimated_departure": "TBA",
+  "estimated_arrival": "TBA",
+  "coordinates": {
+    "from": null,
+    "to": null
+  },
+  "route_events": [],
+  "vessels": [],
+  "containers": [],
+  "scraped_at": "2026-01-29T08:17:56.440390",
+  "screenshot": "searates_BK-2026-008_1769674692.png"
+}
