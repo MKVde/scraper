@@ -102,7 +102,7 @@ class SeaRatesScraper:
                     pass
                 return {'error': str(e), 'screenshot': screenshot}
 
-        def _capture_api_from_session(self, sb, bol_number):
+    def _capture_api_from_session(self, sb, bol_number):
         """
         Capture API response from current browser session
         Uses browser's fetch API to call the endpoint directly
@@ -112,31 +112,6 @@ class SeaRatesScraper:
             api_url = f"https://www.searates.com/tracking-system/reverse/tracking?route=true&last_successful=false&number={bol_number}&sealine=AUTO"
             
             print(f"   [+] Calling API: {api_url[:60]}...")
-            
-            # Execute fetch in browser context (uses same session/cookies)
-            fetch_script = f"""
-            return fetch('{api_url}', {{
-                method: 'GET',
-                credentials: 'include',
-                headers: {{
-                    'Accept': 'application/json',
-                    'User-Agent': navigator.userAgent
-                }}
-            }})
-            .then(response => response.json())
-            .then(data => {{
-                return {{
-                    success: true,
-                    data: data
-                }};
-            }})
-            .catch(err => {{
-                return {{
-                    success: false,
-                    error: err.toString()
-                }};
-            }});
-            """
             
             # Wait for fetch to complete (synchronous execution)
             api_response = sb.driver.execute_async_script("""
@@ -193,27 +168,29 @@ class SeaRatesScraper:
         try:
             print("   [+] Trying XMLHttpRequest method...")
             
-            xhr_script = """
-            return new Promise((resolve) => {
+            xhr_response = sb.driver.execute_async_script("""
+                const callback = arguments[arguments.length - 1];
+                const apiUrl = arguments[0];
+                
                 const xhr = new XMLHttpRequest();
-                xhr.open('GET', arguments[0], true);
+                xhr.open('GET', apiUrl, true);
                 xhr.setRequestHeader('Accept', 'application/json');
                 
                 xhr.onload = function() {
                     if (xhr.status === 200) {
                         try {
-                            resolve({
+                            callback({
                                 success: true,
                                 data: JSON.parse(xhr.responseText)
                             });
                         } catch(e) {
-                            resolve({
+                            callback({
                                 success: false,
                                 error: 'JSON parse error'
                             });
                         }
                     } else {
-                        resolve({
+                        callback({
                             success: false,
                             error: 'HTTP ' + xhr.status
                         });
@@ -221,21 +198,14 @@ class SeaRatesScraper:
                 };
                 
                 xhr.onerror = function() {
-                    resolve({
+                    callback({
                         success: false,
                         error: 'Network error'
                     });
                 };
                 
                 xhr.send();
-            });
-            """
-            
-            xhr_response = sb.driver.execute_async_script(
-                "const callback = arguments[arguments.length - 1]; " +
-                "(" + xhr_script + ")(arguments[0]).then(callback);",
-                api_url
-            )
+            """, api_url)
             
             if xhr_response and xhr_response.get('success'):
                 api_data = xhr_response.get('data')
