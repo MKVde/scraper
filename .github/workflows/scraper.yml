@@ -67,11 +67,25 @@ jobs:
           if [ -n "$LATEST_JSON" ]; then
             echo "📤 Sending: $(basename $LATEST_JSON)"
             
+            # Added retry, connect-timeout and max-time
             RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$PHP_API_URL" \
               -H "X-API-KEY: $PHP_API_KEY" \
               -H "Content-Type: application/json" \
+              --connect-timeout 30 \
+              --max-time 60 \
+              --retry 2 \
+              --retry-delay 5 \
               -d @"$LATEST_JSON")
             
+            EXIT_CODE=$?
+            
+            if [ $EXIT_CODE -ne 0 ]; then
+               echo "⚠️ Curl failed with exit code $EXIT_CODE"
+               # If exit code is 28 (timeout) but we know data usually gets there, maybe we don't prefer to fail hard?
+               # But for now, let's just report it.
+               exit 1
+            fi
+
             HTTP_CODE=$(echo "$RESPONSE" | tail -1)
             BODY=$(echo "$RESPONSE" | head -n -1)
             
