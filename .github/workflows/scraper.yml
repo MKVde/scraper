@@ -1,105 +1,126 @@
-name: SeaRates Unified Scraper
+name: SeaRates Container Tracker
 
 on:
+  # Schedule - runs every 3 days at 3 AM UTC
   schedule:
-    - cron: '0 */6 * * *'  # Every 6 hours
+    - cron: '0 3 */3 * *'  # Every 3 days at 3 AM UTC
+  
+  # API Trigger - from PHP app when BOL is submitted
+  repository_dispatch:
+    types: [track_bol]
+  
+  # Manual trigger - click "Run workflow" button
   workflow_dispatch:
     inputs:
       bol_number:
-        description: 'BOL number (leave empty for bol_list.txt)'
+        description: 'BOL number to track (leave empty to use bol_list.txt)'
         required: false
         type: string
+  
+  # Trigger on push (for testing)
   push:
     branches: [ main ]
     paths:
       - 'bol_list.txt'
-      - 'searates_unified.py'
-
-permissions:
-  contents: write
+      - 'searates_scraper.py'
+      - 'requirements.txt'
 
 jobs:
-  scrape:
+  scrape-searates:
     runs-on: ubuntu-latest
     
+    permissions:
+      contents: write  # Allow pushing results back to repo
+    
     steps:
-      - name: 📥 Checkout
-        uses: actions/checkout@v4
-      
-      - name: 📝 Prepare BOL (if provided)
-        if: github.event.inputs.bol_number != ''
-        run: echo "${{ github.event.inputs.bol_number }}" > bol_list.txt
-      
-      - name: 🐍 Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-      
-      - name: 🌐 Install Chrome
-        run: |
-          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-          sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq google-chrome-stable
-          google-chrome --version
-      
-      - name: 📦 Install Dependencies
-        run: |
-          pip install --upgrade pip
-          pip install seleniumbase beautifulsoup4
-      
-      - name: 🚀 Run Unified Scraper
-        run: python searates_unified.py
-      
-      - name: 📊 Display Results Summary
-        if: success()
-        run: |
-          echo "📦 Scraping Summary:"
-          ls -lh data/ | tail -10
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: 📝 Prepare BOL list (API trigger)
+      if: github.event_name == 'repository_dispatch'
+      run: |
+        echo "Triggered via API for BOL: ${{ github.event.client_payload.bol }}"
+        echo "${{ github.event.client_payload.bol }}" > bol_list.txt
+    
+    - name: 📝 Prepare BOL list (Manual trigger)
+      if: github.event_name == 'workflow_dispatch' && github.event.inputs.bol_number != ''
+      run: |
+        echo "Manual trigger for BOL: ${{ github.event.inputs.bol_number }}"
+        echo "${{ github.event.inputs.bol_number }}" > bol_list.txt
+    
+    - name: 🐍 Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: 🌐 Install Google Chrome
+      run: |
+        wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+        sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq google-chrome-stable
+        google-chrome --version
+    
+    - name: 📦 Install Python dependencies
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: 🚀 Run SeaRates scraper
+      run: python searates_scraper.py
+    
+    - name: 📡 Send results to PHP API
+      if: success()
+      env:
+        PHP_API_URL: ${{ secrets.PHP_API_URL }}
+        PHP_API_KEY: ${{ secrets.PHP_API_KEY }}
+      run: |
+        # Find the most recent JSON file
+        LATEST_JSON=$(ls -t data/searates_*.json 2>/dev/null | head -1)
+        
+        if [ -n "$LATEST_JSON" ] && [ -n "$PHP_API_URL" ] && [ -n "$PHP_API_KEY" ]; then
+          echo "📤 Sending $LATEST_JSON to PHP API..."
           
-          # Show latest report
-          LATEST_REPORT=$(ls -t data/report_*.txt 2>/dev/null | head -1)
-          if [ -n "$LATEST_REPORT" ]; then
-            echo ""
-            echo "📄 Latest Report:"
-            cat "$LATEST_REPORT"
-          fi
-      
-      - name: 📡 Send to PHP API (optional)
-        if: success()
-        env:
-          PHP_API_URL: ${{ secrets.PHP_API_URL }}
-          PHP_API_KEY: ${{ secrets.PHP_API_KEY }}
-        run: |
-          if [ -z "$PHP_API_URL" ]; then
-            echo "⚠️  PHP_API_URL not configured"
-            exit 0
-          fi
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$PHP_API_URL" \
+            -H "X-API-KEY: $PHP_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d @"$LATEST_JSON")
           
-          # Send latest API file
-          LATEST_API=$(ls -t data/api_full_*.json 2>/dev/null | head -1)
-          if [ -n "$LATEST_API" ]; then
-            echo "📤 Sending: $(basename $LATEST_API)"
-            curl -X POST "$PHP_API_URL" \
-              -H "X-API-KEY: $PHP_API_KEY" \
-              -H "Content-Type: application/json" \
-              -d @"$LATEST_API" \
-              -w "\nHTTP: %{http_code}\n"
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+          
+          echo "Response: $BODY"
+          echo "HTTP Code: $HTTP_CODE"
+          
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "⚠️ API returned non-200 status"
+          else
+            echo "✅ Data sent successfully!"
           fi
-      
-      - name: 💾 Commit Results
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "📦 Update tracking: $(date +'%Y-%m-%d %H:%M')"
-          file_pattern: 'data/*.json data/*.txt *.png'
-      
-      - name: 📤 Upload Artifacts
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: unified-results-${{ github.run_number }}
-          path: |
-            data/
-            *.png
-          retention-days: 90
+        else
+          echo "⚠️ Skipping API callback (missing JSON, URL, or API key)"
+        fi
+    
+    - name: 💾 Commit and push results
+      run: |
+        git config user.name "SeaRates Bot"
+        git config user.email "bot@searates-scraper.github.io"
+        git add data/
+        git diff --quiet && git diff --staged --quiet || git commit -m "📊 Auto-update: Scraping results $(date +'%Y-%m-%d %H:%M:%S UTC')"
+        git push
+    
+    - name: 📤 Upload artifacts (90-day retention)
+      uses: actions/upload-artifact@v4
+      with:
+        name: scraping-results-${{ github.run_number }}
+        path: |
+          data/*.json
+          data/*.txt
+          data/*.png
+        retention-days: 90
+    
+    - name: 📧 Notify on failure
+      if: failure()
+      run: echo "⚠️ Scraping failed! Check the logs above."
+
