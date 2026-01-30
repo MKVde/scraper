@@ -3,12 +3,14 @@ name: SeaRates Container Tracker
 on:
   schedule:
     - cron: '0 3 */3 * *'
+  
   workflow_dispatch:
     inputs:
       bol_number:
         description: 'BOL number to track (leave empty to use bol_list.txt)'
         required: false
         type: string
+  
   push:
     branches: [ main ]
     paths:
@@ -19,6 +21,7 @@ on:
 jobs:
   scrape-searates:
     runs-on: ubuntu-latest
+    
     permissions:
       contents: write
     
@@ -56,7 +59,7 @@ jobs:
       - name: 🚀 Run SeaRates scraper
         run: python searates_scraper.py
       
-      - name: 📡 Send data to PHP API
+      - name: 📡 Send HTML data to PHP API
         if: success()
         env:
           PHP_API_URL: ${{ secrets.PHP_API_URL }}
@@ -67,15 +70,16 @@ jobs:
             exit 0
           fi
           
-          LATEST_COMBINED=$(ls -t data/searates_[0-9]*_[0-9]*.json 2>/dev/null | grep -v 'api_' | head -1)
+          # Find latest HTML file
+          LATEST_HTML=$(ls -t data/searates_html_*.json 2>/dev/null | head -1)
           
-          if [ -n "$LATEST_COMBINED" ]; then
-            echo "📤 Sending: $(basename $LATEST_COMBINED)"
+          if [ -n "$LATEST_HTML" ]; then
+            echo "📤 Sending: $(basename $LATEST_HTML)"
             
             RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$PHP_API_URL" \
               -H "X-API-KEY: $PHP_API_KEY" \
               -H "Content-Type: application/json" \
-              -d @"$LATEST_COMBINED")
+              -d @"$LATEST_HTML")
             
             HTTP_CODE=$(echo "$RESPONSE" | tail -1)
             BODY=$(echo "$RESPONSE" | head -n -1)
@@ -89,41 +93,44 @@ jobs:
               echo "⚠️ Failed with status $HTTP_CODE"
             fi
           else
-            echo "⚠️ No combined file found"
+            echo "⚠️ No HTML file found"
           fi
           
+          # List API files (not sent)
           echo ""
-          echo "📁 Files saved:"
-          echo "API responses:"
-          ls -lh data/searates_api_*.json 2>/dev/null | tail -3 || echo "  (none)"
-          echo "Combined data:"
-          ls -lh data/searates_[0-9]*.json 2>/dev/null | grep -v 'api_' | tail -3 || echo "  (none)"
+          echo "📁 API files saved in repo:"
+          ls -1 data/searates_api_*.json 2>/dev/null | xargs -n1 basename || echo "  (none)"
       
       - name: 💾 Commit and push results
         run: |
           git config user.name "SeaRates Bot"
           git config user.email "bot@searates-scraper.github.io"
           
+          # Pull with rebase
           echo "🔄 Pulling latest..."
           git pull --rebase origin main || echo "⚠️ Pull failed"
           
+          # Add files
           git add data/ *.png 2>/dev/null || true
           
+          # Check for changes
           if git diff --quiet && git diff --staged --quiet; then
-            echo "ℹ️ No changes to commit"
+            echo "ℹ️ No changes"
           else
             BOL_NUM=$(head -1 bol_list.txt 2>/dev/null || echo "unknown")
             git commit -m "📊 Update: $(date +'%Y-%m-%d %H:%M') [BOL: $BOL_NUM]"
             
+            # Retry push
             for i in 1 2 3; do
               echo "🚀 Push attempt $i/3..."
+              
               if git push origin main; then
-                echo "✅ Pushed successfully!"
+                echo "✅ Pushed!"
                 exit 0
               fi
               
               if [ $i -lt 3 ]; then
-                echo "⚠️ Retrying in 5 seconds..."
+                echo "⚠️ Retry in 5s..."
                 sleep 5
                 git pull --rebase origin main || true
               fi
