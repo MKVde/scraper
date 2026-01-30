@@ -1,11 +1,9 @@
 name: SeaRates Container Tracker
 
 on:
-  # Schedule - runs every 3 days at 3 AM UTC
   schedule:
     - cron: '0 3 */3 * *'
   
-  # Manual/API trigger - works with fine-grained tokens
   workflow_dispatch:
     inputs:
       bol_number:
@@ -13,7 +11,6 @@ on:
         required: false
         type: string
   
-  # Trigger on push (for testing)
   push:
     branches: [ main ]
     paths:
@@ -32,7 +29,7 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Fetch full history to avoid conflicts
+          fetch-depth: 0
       
       - name: 📝 Prepare BOL list (if provided)
         if: github.event.inputs.bol_number != ''
@@ -68,114 +65,79 @@ jobs:
           PHP_API_URL: ${{ secrets.PHP_API_URL }}
           PHP_API_KEY: ${{ secrets.PHP_API_KEY }}
         run: |
-          # Check if API credentials are configured
           if [ -z "$PHP_API_URL" ] || [ -z "$PHP_API_KEY" ]; then
-            echo "⚠️ API credentials not configured, skipping API callback"
+            echo "⚠️ API credentials not set"
             exit 0
           fi
           
-          # Find latest HTML-scraped file
+          # Find latest HTML file
           LATEST_HTML=$(ls -t data/searates_html_*.json 2>/dev/null | head -1)
           
-          if [ -z "$LATEST_HTML" ]; then
-            echo "⚠️ No HTML-scraped JSON file found"
-            exit 0
-          fi
-          
-          echo "=================================================="
-          echo "📤 SENDING HTML DATA TO PHP API"
-          echo "=================================================="
-          echo "File: $(basename $LATEST_HTML)"
-          echo ""
-          
-          # Send to PHP API
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$PHP_API_URL" \
-            -H "X-API-KEY: $PHP_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d @"$LATEST_HTML")
-          
-          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-          BODY=$(echo "$RESPONSE" | head -n -1)
-          
-          echo "Response: $BODY"
-          echo "HTTP Code: $HTTP_CODE"
-          echo ""
-          
-          if [ "$HTTP_CODE" = "200" ]; then
-            echo "✅ HTML data sent successfully to PHP API!"
+          if [ -n "$LATEST_HTML" ]; then
+            echo "📤 Sending: $(basename $LATEST_HTML)"
+            
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$PHP_API_URL" \
+              -H "X-API-KEY: $PHP_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d @"$LATEST_HTML")
+            
+            HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+            BODY=$(echo "$RESPONSE" | head -n -1)
+            
+            echo "Response: $BODY"
+            echo "HTTP Code: $HTTP_CODE"
+            
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Success!"
+            else
+              echo "⚠️ Failed with status $HTTP_CODE"
+            fi
           else
-            echo "⚠️ API returned status: $HTTP_CODE"
+            echo "⚠️ No HTML file found"
           fi
           
-          echo "=================================================="
+          # List API files (not sent)
           echo ""
-          echo "ℹ️  API JSON files saved in repo for reference only"
-          
-          # List API files (for logging)
-          API_FILES=$(ls -t data/searates_api_*.json 2>/dev/null)
-          if [ -n "$API_FILES" ]; then
-            echo "📁 API Response files in repo:"
-            for file in $API_FILES; do
-              echo "   - $(basename $file)"
-            done
-          fi
-          echo "=================================================="
+          echo "📁 API files saved in repo:"
+          ls -1 data/searates_api_*.json 2>/dev/null | xargs -n1 basename || echo "  (none)"
       
       - name: 💾 Commit and push results
         run: |
           git config user.name "SeaRates Bot"
           git config user.email "bot@searates-scraper.github.io"
           
-          # Pull latest changes with rebase
-          echo "🔄 Pulling latest changes..."
-          git pull --rebase origin main || echo "⚠️ Pull failed or no remote changes"
+          # Pull with rebase
+          echo "🔄 Pulling latest..."
+          git pull --rebase origin main || echo "⚠️ Pull failed"
           
-          # Add data directory and screenshots
+          # Add files
           git add data/ *.png 2>/dev/null || true
           
-          # Check if there are changes
+          # Check for changes
           if git diff --quiet && git diff --staged --quiet; then
-            echo "ℹ️ No changes to commit"
+            echo "ℹ️ No changes"
           else
-            echo "📝 Committing changes..."
+            BOL_NUM=$(head -1 bol_list.txt 2>/dev/null || echo "unknown")
+            git commit -m "📊 Update: $(date +'%Y-%m-%d %H:%M') [BOL: $BOL_NUM]"
             
-            # Get BOL number for commit message
-            BOL_NUM=$(cat bol_list.txt 2>/dev/null | head -1 | tr -d '\n' || echo "unknown")
-            
-            # Count files
-            HTML_COUNT=$(ls data/searates_html_*.json 2>/dev/null | wc -l)
-            API_COUNT=$(ls data/searates_api_*.json 2>/dev/null | wc -l)
-            
-            git commit -m "📊 Auto-update: $(date +'%Y-%m-%d %H:%M:%S UTC') [BOL: $BOL_NUM] (HTML: $HTML_COUNT, API: $API_COUNT)"
-            
-            # Push with retry logic
-            MAX_RETRIES=3
-            RETRY_COUNT=0
-            PUSH_SUCCESS=false
-            
-            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-              echo "🚀 Pushing changes (attempt $RETRY_COUNT/$MAX_RETRIES)..."
+            # Retry push
+            for i in 1 2 3; do
+              echo "🚀 Push attempt $i/3..."
               
               if git push origin main; then
-                echo "✅ Successfully pushed changes!"
-                PUSH_SUCCESS=true
-                break
-              else
-                if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                  echo "⚠️ Push failed, retrying in 5 seconds..."
-                  sleep 5
-                  git pull --rebase origin main || echo "⚠️ Rebase failed"
-                else
-                  echo "❌ Failed to push after $MAX_RETRIES attempts"
-                fi
+                echo "✅ Pushed!"
+                exit 0
+              fi
+              
+              if [ $i -lt 3 ]; then
+                echo "⚠️ Retry in 5s..."
+                sleep 5
+                git pull --rebase origin main || true
               fi
             done
             
-            if [ "$PUSH_SUCCESS" = false ]; then
-              echo "💡 Tip: Check if another workflow is running"
-              exit 1
-            fi
+            echo "❌ Push failed after 3 attempts"
+            exit 1
           fi
       
       - name: 📤 Upload artifacts
@@ -190,6 +152,4 @@ jobs:
       
       - name: 📧 Notify on failure
         if: failure()
-        run: |
-          echo "⚠️ Scraping workflow failed!"
-          echo "Check the logs above for details."
+        run: echo "⚠️ Workflow failed! Check logs."
