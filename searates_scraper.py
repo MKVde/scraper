@@ -2,8 +2,7 @@
 
 """
 SeaRates Scraper for GitHub Actions
-Automated container tracking with Cloudflare bypass + FULL API Response Capture
-ADVANCED: Uses CDP Network Interception to capture 40KB API response
+FIXED: CDP Network monitoring BEFORE page load to capture API response
 """
 
 import os
@@ -14,16 +13,17 @@ import time
 import json
 from datetime import datetime
 import re
+import threading
 
 class SeaRatesScraper:
     def __init__(self):
         """Initialize with UC Mode enabled"""
         self.sb = None
+        self.captured_api_response = None
 
     def track_bol_with_api(self, bol_number, sealine="AUTO"):
         """
-        COMBINED METHOD: Track shipment AND capture FULL API in ONE browser session
-        Uses CDP Network Interception for 40KB API capture!
+        FIXED: Network monitoring BEFORE page load
         """
         with SB(uc=True, headless=True, xvfb=True) as sb:
             self.sb = sb
@@ -36,11 +36,11 @@ class SeaRatesScraper:
                 
                 url = f"https://www.searates.com/container/tracking/?number={bol_number}&sealine={sealine}&shipment-type=sea"
                 
-                # STEP 1: Inject XHR interceptor BEFORE page loads
-                print("[1/9] Setting up API interceptor...")
-                self._inject_xhr_interceptor(sb)
+                # CRITICAL: Enable CDP Network monitoring FIRST
+                print("[1/9] Enabling CDP Network monitoring...")
+                self._enable_network_capture(sb)
                 
-                # STEP 2: Open page with Cloudflare bypass
+                # STEP 2: Open page (network already monitoring)
                 print("[2/9] Opening page with Cloudflare bypass...")
                 sb.uc_open_with_reconnect(url, reconnect_time=4)
                 
@@ -49,7 +49,7 @@ class SeaRatesScraper:
                 sb.sleep(3)
                 
                 print("[4/9] Waiting for tracking data + API calls...")
-                sb.sleep(10)  # Give API time to be captured
+                sb.sleep(10)  # Give time for API call
                 
                 # STEP 3: Extract HTML data
                 print("[5/9] Extracting basic tracking information...")
@@ -73,9 +73,9 @@ class SeaRatesScraper:
                 except Exception as e:
                     print(f"   ⚠ Could not access Containers tab: {e}")
                 
-                # STEP 6: Capture API response (using CDP interception)
-                print("\n[8/9] Capturing API response (40KB)...")
-                api_data = self._capture_api_from_session(sb, bol_number)
+                # STEP 6: Get captured API response
+                print("\n[8/9] Retrieving captured API response...")
+                api_data = self._get_captured_response(sb)
                 tracking_data['api_response'] = api_data
                 
                 # STEP 7: Screenshot
@@ -98,216 +98,211 @@ class SeaRatesScraper:
                     pass
                 return {'error': str(e), 'screenshot': screenshot}
 
-    def _inject_xhr_interceptor(self, sb):
+    def _enable_network_capture(self, sb):
         """
-        Inject XHR interceptor BEFORE page loads
-        This captures the API response automatically when it's called
+        Enable CDP Network domain and start capturing responses
+        This MUST run BEFORE opening the page
         """
-        intercept_script = """
-        (function() {
-            console.log('[SEARATES] Injecting XHR interceptor...');
-            
-            // Store original XMLHttpRequest and fetch
-            const originalXHR = {
-                open: XMLHttpRequest.prototype.open,
-                send: XMLHttpRequest.prototype.send
-            };
-            
-            const originalFetch = window.fetch;
-            
-            // Override XMLHttpRequest
-            XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-                this._url = url;
-                this._method = method;
-                return originalXHR.open.call(this, method, url, ...rest);
-            };
-            
-            XMLHttpRequest.prototype.send = function(...args) {
-                this.addEventListener('load', function() {
-                    if (this._url && this._url.includes('tracking-system/reverse/tracking')) {
-                        try {
-                            const response = JSON.parse(this.responseText);
-                            window.__SEARATES_API_RESPONSE__ = response;
-                            window.__SEARATES_API_CAPTURED_AT__ = new Date().toISOString();
-                            console.log('[SEARATES] ✓ API Response Captured!', Object.keys(response));
-                        } catch(e) {
-                            console.error('[SEARATES] Failed to parse API response:', e);
-                        }
-                    }
-                });
-                return originalXHR.send.call(this, ...args);
-            };
-            
-            // Override fetch
-            window.fetch = function(url, ...args) {
-                return originalFetch.call(this, url, ...args).then(response => {
-                    if (url.includes('tracking-system/reverse/tracking')) {
-                        response.clone().json().then(data => {
-                            window.__SEARATES_API_RESPONSE__ = data;
-                            window.__SEARATES_API_CAPTURED_AT__ = new Date().toISOString();
-                            console.log('[SEARATES] ✓ API Response Captured via Fetch!', Object.keys(data));
-                        }).catch(e => {
-                            console.error('[SEARATES] Failed to clone fetch response:', e);
-                        });
-                    }
-                    return response;
-                });
-            };
-            
-            console.log('[SEARATES] ✓ XHR/Fetch interceptor ready');
-        })();
-        """
-        
         try:
-            # Method 1: Try CDP injection (best)
+            # Enable Network domain
+            sb.driver.execute_cdp_cmd('Network.enable', {})
+            print("   ✓ CDP Network domain enabled")
+            
+            # Also inject JavaScript interceptor as backup
+            intercept_script = """
+            (function() {
+                console.log('[SEARATES] Installing backup interceptor...');
+                
+                const originalXHR = XMLHttpRequest.prototype.open;
+                const originalSend = XMLHttpRequest.prototype.send;
+                
+                XMLHttpRequest.prototype.open = function(method, url) {
+                    this._url = url;
+                    this._method = method;
+                    return originalXHR.apply(this, arguments);
+                };
+                
+                XMLHttpRequest.prototype.send = function() {
+                    this.addEventListener('load', function() {
+                        if (this._url && this._url.includes('tracking-system/reverse/tracking')) {
+                            try {
+                                const data = JSON.parse(this.responseText);
+                                window.__SEARATES_API__ = data;
+                                console.log('[SEARATES] ✓ Backup captured API');
+                            } catch(e) {}
+                        }
+                    });
+                    return originalSend.apply(this, arguments);
+                };
+                
+                // Also override fetch
+                const originalFetch = window.fetch;
+                window.fetch = function(url, options) {
+                    return originalFetch.apply(this, arguments).then(response => {
+                        if (url.includes('tracking-system/reverse/tracking')) {
+                            response.clone().json().then(data => {
+                                window.__SEARATES_API__ = data;
+                                console.log('[SEARATES] ✓ Backup captured via fetch');
+                            }).catch(e => {});
+                        }
+                        return response;
+                    });
+                };
+                
+                console.log('[SEARATES] ✓ Backup interceptor ready');
+            })();
+            """
+            
+            # Inject before page loads
             sb.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
                 'source': intercept_script
             })
-            print("   ✓ CDP XHR interceptor injected")
+            print("   ✓ Backup JavaScript interceptor injected")
+            
         except Exception as e:
-            print(f"   ⚠ CDP injection failed: {e}")
-            # Method 2: Fallback to manual injection after load
-            try:
-                sb.driver.execute_script(intercept_script)
-                print("   ✓ Manual XHR interceptor injected")
-            except Exception as e2:
-                print(f"   ✗ All injection methods failed: {e2}")
+            print(f"   ⚠ Network monitoring setup failed: {e}")
 
-    def _capture_api_from_session(self, sb, bol_number):
+    def _get_captured_response(self, sb):
         """
-        Capture the FULL 40KB API response that was intercepted
+        Retrieve the captured API response using multiple methods
         """
         try:
-            print("   [+] Checking for captured API response...")
+            print("   [+] Method 1: Checking JavaScript backup...")
             
-            # Wait up to 20 seconds for API to be captured
-            api_data = None
-            for attempt in range(20):
-                check_script = """
-                return {
-                    response: window.__SEARATES_API_RESPONSE__ || null,
-                    capturedAt: window.__SEARATES_API_CAPTURED_AT__ || null
-                };
-                """
-                
-                result = sb.driver.execute_script(check_script)
-                api_data = result.get('response') if result else None
-                captured_at = result.get('capturedAt') if result else None
-                
-                if api_data:
-                    print(f"   ✓ API captured at: {captured_at}")
-                    break
-                
-                # Show progress
-                if attempt % 5 == 0 and attempt > 0:
-                    print(f"   ⏳ Still waiting... ({attempt}s)")
-                
-                time.sleep(1)
+            # Check JavaScript backup first (most reliable)
+            check_script = "return window.__SEARATES_API__ || null;"
+            api_data = sb.driver.execute_script(check_script)
             
-            # Validate and return
             if api_data and isinstance(api_data, dict):
-                # Check if it's a success response
-                if api_data.get('status') == 'success' and 'data' in api_data:
-                    data_size = len(json.dumps(api_data))
-                    print(f"   ✓ FULL API Response Captured! ({data_size:,} bytes)")
-                    
-                    # Show summary
-                    metadata = api_data.get('data', {}).get('metadata', {})
-                    containers = api_data.get('data', {}).get('containers', [])
-                    print(f"   ✓ Containers with events: {len(containers)}")
-                    print(f"   ✓ Shipping line: {metadata.get('sealine_name', 'N/A')}")
-                    
+                if api_data.get('status') == 'success':
+                    size = len(json.dumps(api_data))
+                    print(f"   ✓ SUCCESS! Captured from JavaScript backup ({size:,} bytes)")
                     return {
                         'success': True,
-                        'source': 'cdp_xhr_intercept',
+                        'source': 'javascript_backup',
                         'data': api_data,
-                        'captured_at': captured_at or datetime.now().isoformat(),
-                        'size_bytes': data_size
+                        'captured_at': datetime.now().isoformat(),
+                        'size_bytes': size
                     }
-                
-                # Check if rate limited
                 elif api_data.get('message') == 'API_KEY_LIMIT_REACHED':
-                    print("   ⚠ SeaRates API rate limit reached")
-                    print("   ℹ️ Free tier: 1 search/day")
+                    print("   ⚠ API rate limit reached")
                     return {
                         'success': False,
                         'error': 'API_KEY_LIMIT_REACHED',
-                        'note': 'SeaRates free tier limit (1 unique search per day)',
-                        'raw_response': api_data
-                    }
-                
-                # Unknown response format
-                else:
-                    print(f"   ⚠ Unexpected API format: {list(api_data.keys())}")
-                    return {
-                        'success': False,
-                        'error': 'Unexpected response format',
+                        'note': 'Free tier: 1 search/day',
                         'raw_response': api_data
                     }
             
-            # No API captured - try alternative methods
-            print("   ⚠ Primary capture failed, trying alternatives...")
+            # Method 2: Try CDP Network.getResponseBody
+            print("   [+] Method 2: Checking CDP performance logs...")
             
-            # Alternative 1: Check performance entries
             try:
+                # Get performance entries to find request ID
                 perf_script = """
+                return performance.getEntries()
+                    .filter(e => e.name && e.name.includes('tracking-system/reverse/tracking'))
+                    .map(e => ({url: e.name, duration: e.duration}));
+                """
+                entries = sb.driver.execute_script(perf_script)
+                
+                if entries and len(entries) > 0:
+                    print(f"   ✓ Found {len(entries)} API call(s)")
+                    
+                    # Try to get logs (may not work in UC mode)
+                    try:
+                        logs = sb.driver.get_log('performance')
+                        target_request_id = None
+                        
+                        for log in logs:
+                            try:
+                                message = json.loads(log['message'])['message']
+                                if message.get('method') == 'Network.responseReceived':
+                                    params = message['params']
+                                    response = params['response']
+                                    if 'tracking-system/reverse/tracking' in response['url']:
+                                        target_request_id = params['requestId']
+                                        print(f"   ✓ Found request ID: {target_request_id[:20]}...")
+                                        break
+                            except:
+                                continue
+                        
+                        if target_request_id:
+                            response_body = sb.driver.execute_cdp_cmd('Network.getResponseBody', {
+                                'requestId': target_request_id
+                            })
+                            body_content = response_body.get('body', '')
+                            api_data = json.loads(body_content)
+                            
+                            if api_data:
+                                size = len(json.dumps(api_data))
+                                print(f"   ✓ SUCCESS! Captured via CDP ({size:,} bytes)")
+                                return {
+                                    'success': True,
+                                    'source': 'cdp_performance_logs',
+                                    'data': api_data,
+                                    'captured_at': datetime.now().isoformat(),
+                                    'size_bytes': size
+                                }
+                    except Exception as e:
+                        print(f"   ⚠ Performance logs not available: {e}")
+                else:
+                    print("   ⚠ No API calls found in performance entries")
+                    
+            except Exception as e:
+                print(f"   ⚠ CDP method failed: {e}")
+            
+            # Method 3: Try to re-fetch (will use cache/cost 0 calls)
+            print("   [+] Method 3: Attempting cached fetch...")
+            
+            try:
+                # Get the API URL from performance
+                api_url_script = """
                 const entries = performance.getEntries()
                     .filter(e => e.name && e.name.includes('tracking-system/reverse/tracking'));
                 return entries.length > 0 ? entries[0].name : null;
                 """
-                api_url = sb.driver.execute_script(perf_script)
+                api_url = sb.driver.execute_script(api_url_script)
                 
                 if api_url:
-                    print(f"   ✓ Found API URL in performance: {api_url[:80]}...")
-                    # Note: We can't re-fetch it (would waste another API call)
-                    return {
-                        'success': False,
-                        'error': 'API URL found but not captured',
-                        'note': 'Response body was not intercepted',
-                        'api_url': api_url
-                    }
-            except Exception as e:
-                print(f"   ⚠ Performance check failed: {e}")
-            
-            # Alternative 2: Check if data is in DOM
-            try:
-                dom_script = """
-                const scripts = document.querySelectorAll('script[type="application/json"]');
-                for (let script of scripts) {
-                    try {
-                        const data = JSON.parse(script.textContent);
-                        if (data && data.containers) {
-                            return data;
+                    print(f"   ✓ Found API URL (length: {len(api_url)})")
+                    
+                    # Try async fetch (might be cached)
+                    fetch_script = f"""
+                    var callback = arguments[arguments.length - 1];
+                    fetch('{api_url}', {{
+                        credentials: 'include',
+                        cache: 'force-cache'
+                    }})
+                    .then(r => r.json())
+                    .then(data => callback(data))
+                    .catch(e => callback(null));
+                    """
+                    
+                    api_data = sb.driver.execute_async_script(fetch_script)
+                    
+                    if api_data and isinstance(api_data, dict):
+                        size = len(json.dumps(api_data))
+                        print(f"   ✓ SUCCESS! Fetched from cache ({size:,} bytes)")
+                        return {
+                            'success': True,
+                            'source': 'cached_fetch',
+                            'data': api_data,
+                            'captured_at': datetime.now().isoformat(),
+                            'size_bytes': size
                         }
-                    } catch(e) {}
-                }
-                return null;
-                """
-                dom_data = sb.driver.execute_script(dom_script)
-                
-                if dom_data:
-                    print("   ✓ Found tracking data in DOM!")
-                    return {
-                        'success': True,
-                        'source': 'dom_json',
-                        'data': dom_data,
-                        'captured_at': datetime.now().isoformat()
-                    }
             except Exception as e:
-                print(f"   ⚠ DOM check failed: {e}")
+                print(f"   ⚠ Cached fetch failed: {e}")
             
-            # Final fallback
-            print("   ⚠ Could not capture API response")
-            print("   ℹ️ HTML scraping captured all visible data")
+            # All methods failed
+            print("   ✗ All capture methods failed")
             return {
                 'success': False,
-                'error': 'API capture methods exhausted',
-                'note': 'All tracking data was captured via HTML scraping',
-                'reason': 'Possible rate limit, API structure changed, or interception blocked'
+                'error': 'All capture methods exhausted',
+                'note': 'HTML scraping captured all visible data'
             }
             
         except Exception as e:
-            print(f"   ⚠ Capture error: {e}")
+            print(f"   ✗ Capture error: {e}")
             import traceback
             traceback.print_exc()
             return {
@@ -560,7 +555,7 @@ def main():
         bol_numbers = ["3100124492"]
     
     print("\n" + "="*70)
-    print("SEARATES SCRAPER - ADVANCED (CDP API CAPTURE)")
+    print("SEARATES SCRAPER - FIXED CDP CAPTURE")
     print("="*70)
     print(f"Processing {len(bol_numbers)} BOL(s)\n")
     
@@ -589,7 +584,8 @@ def main():
             api_resp = results.get('api_response', {})
             if api_resp.get('success'):
                 size = api_resp.get('size_bytes', 0)
-                print(f"API Captured: ✓ YES! ({size:,} bytes via {api_resp.get('source')})")
+                source = api_resp.get('source', 'unknown')
+                print(f"API Captured: ✓ YES! ({size:,} bytes via {source})")
             else:
                 error = api_resp.get('error', 'unknown')
                 print(f"API Captured: ✗ No ({error})")
