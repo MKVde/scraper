@@ -42,6 +42,44 @@ jobs:
           # Move results to results directory
           mv tracking_*.json results/ 2>/dev/null || true
       
+      - name: 📡 Send JSON data to PHP API
+        if: success()
+        env:
+          PHP_API_URL: ${{ secrets.PHP_API_URL }}
+          PHP_API_KEY: ${{ secrets.PHP_API_KEY }}
+        run: |
+          if [ -z "$PHP_API_URL" ] || [ -z "$PHP_API_KEY" ]; then
+            echo "⚠️ API credentials not set. Skipping upload."
+            exit 0
+          fi
+          
+          # Find latest FULL JSON file
+          LATEST_JSON=$(ls -t results/tracking_*_full.json 2>/dev/null | head -1)
+          
+          if [ -n "$LATEST_JSON" ]; then
+            echo "📤 Sending: $(basename $LATEST_JSON)"
+            
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$PHP_API_URL" \
+              -H "X-API-KEY: $PHP_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d @"$LATEST_JSON")
+            
+            HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+            BODY=$(echo "$RESPONSE" | head -n -1)
+            
+            echo "Response: $BODY"
+            echo "HTTP Code: $HTTP_CODE"
+            
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Success!"
+            else
+              echo "⚠️ Failed with status $HTTP_CODE"
+              exit 1
+            fi
+          else
+            echo "⚠️ No full JSON file found"
+          fi
+      
       - name: Commit and push results
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
