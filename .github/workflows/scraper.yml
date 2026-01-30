@@ -1,14 +1,9 @@
 name: SeaRates Container Tracking Scraper
 
 on:
-  # Run automatically every day at midnight UTC (3:00 AM EAT)
   schedule:
     - cron: '0 0 * * *'
-  
-  # Allow manual triggering
   workflow_dispatch:
-  
-  # Run on push to main (for testing)
   push:
     branches: [ main ]
     paths:
@@ -44,7 +39,7 @@ jobs:
         python searates_scraper.py
     
     - name: Upload results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4  # ← Changed from v3 to v4
       with:
         name: searates-tracking-data
         path: |
