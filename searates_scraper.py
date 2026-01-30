@@ -18,15 +18,13 @@ class SeaRatesScraper:
     def __init__(self):
         """Initialize with UC Mode enabled"""
         self.sb = None
+        self.captured_requests = []
     
     def track_bol(self, bol_number, sealine="AUTO"):
         """Track shipment bypassing Cloudflare"""
         # Use xvfb for virtual display in GitHub Actions
         with SB(uc=True, headless=True, xvfb=True) as sb:
             self.sb = sb
-            
-            # Enable performance logging for API capture
-            sb.driver.execute_cdp_cmd('Network.enable', {})
             
             try:
                 print(f"\n{'='*70}")
@@ -46,9 +44,9 @@ class SeaRatesScraper:
                 print("[3/8] Waiting for tracking data...")
                 sb.sleep(5)
                 
-                # Capture API response
+                # Capture API response using JavaScript injection
                 print("[4/8] Capturing API response...")
-                api_data = self._capture_api_response(sb, bol_number)
+                api_data = self._capture_api_with_js(sb, bol_number)
                 
                 # Extract basic data
                 print("[5/8] Extracting basic tracking information...")
@@ -64,7 +62,7 @@ class SeaRatesScraper:
                     sb.sleep(3)
                     self._extract_vessel_data(sb, tracking_data)
                 except Exception as e:
-                    print(f"⚠ Could not access Vessel tab: {e}")
+                    print(f"   ⚠ Could not access Vessel tab: {e}")
                 
                 # Click Containers tab
                 print("\n[7/8] Switching to Containers tab...")
@@ -73,7 +71,7 @@ class SeaRatesScraper:
                     sb.sleep(3)
                     self._extract_containers_data(sb, tracking_data)
                 except Exception as e:
-                    print(f"⚠ Could not access Containers tab: {e}")
+                    print(f"   ⚠ Could not access Containers tab: {e}")
                 
                 # Return to Route tab
                 print("\n[8/8] Returning to Route tab...")
@@ -88,7 +86,7 @@ class SeaRatesScraper:
                 screenshot = f"searates_{bol_number}_{int(time.time())}.png"
                 sb.save_screenshot(screenshot)
                 tracking_data['screenshot'] = screenshot
-                print(f"✓ Screenshot saved: {screenshot}\n")
+                print(f"   ✓ Screenshot saved: {screenshot}\n")
                 
                 return tracking_data
                 
@@ -103,53 +101,101 @@ class SeaRatesScraper:
                     pass
                 return {'error': str(e), 'screenshot': screenshot}
     
-    def _capture_api_response(self, sb, bol_number):
-        """Capture the full API response from network logs"""
+    def _capture_api_with_js(self, sb, bol_number):
+        """Capture API response by intercepting XHR with JavaScript"""
         try:
-            # Get performance logs
-            logs = sb.driver.get_log('performance')
+            # Inject XHR interceptor
+            intercept_script = """
+            window.capturedAPIData = null;
             
-            target_api = "tracking-system/reverse/tracking"
-            target_request_id = None
-            found_url = None
-            
-            # Find the API request
-            for log in logs:
-                try:
-                    message = json.loads(log['message'])['message']
-                    if message.get('method') == 'Network.responseReceived':
-                        params = message['params']
-                        response = params['response']
-                        response_url = response['url']
-                        
-                        # Check if this is our target API
-                        if target_api in response_url and response.get('status') == 200:
-                            target_request_id = params['requestId']
-                            found_url = response_url
-                            print(f"   ✓ Found API: {response_url}")
-                            break
-                except:
-                    continue
-            
-            # Get response body
-            if target_request_id:
-                try:
-                    response_body = sb.driver.execute_cdp_cmd('Network.getResponseBody', {
-                        'requestId': target_request_id
-                    })
-                    body_content = response_body.get('body', '')
-                    api_data = json.loads(body_content)
-                    
-                    print(f"   ✓ API response captured successfully!")
-                    return api_data
-                    
-                except Exception as e:
-                    print(f"   ⚠ Could not get API response body: {e}")
-                    return None
-            else:
-                print(f"   ⚠ Target API not found in network logs")
-                return None
+            // Override XMLHttpRequest
+            (function() {
+                var originalOpen = XMLHttpRequest.prototype.open;
+                var originalSend = XMLHttpRequest.prototype.send;
                 
+                XMLHttpRequest.prototype.open = function(method, url) {
+                    this._url = url;
+                    return originalOpen.apply(this, arguments);
+                };
+                
+                XMLHttpRequest.prototype.send = function() {
+                    var xhr = this;
+                    xhr.addEventListener('load', function() {
+                        if (xhr._url && xhr._url.includes('tracking-system/reverse/tracking')) {
+                            try {
+                                window.capturedAPIData = JSON.parse(xhr.responseText);
+                                console.log('API data captured!');
+                            } catch(e) {
+                                console.error('Failed to parse API response', e);
+                            }
+                        }
+                    });
+                    return originalSend.apply(this, arguments);
+                };
+            })();
+            
+            // Also override fetch
+            (function() {
+                const originalFetch = window.fetch;
+                window.fetch = function() {
+                    return originalFetch.apply(this, arguments).then(response => {
+                        if (response.url.includes('tracking-system/reverse/tracking')) {
+                            response.clone().json().then(data => {
+                                window.capturedAPIData = data;
+                                console.log('API data captured from fetch!');
+                            }).catch(err => {
+                                console.error('Failed to parse fetch response', err);
+                            });
+                        }
+                        return response;
+                    });
+                };
+            })();
+            """
+            
+            # Execute intercept script before loading the page
+            sb.execute_script(intercept_script)
+            print("   ✓ API interceptor injected")
+            
+            # Wait a bit for API call
+            sb.sleep(3)
+            
+            # Try to retrieve captured data
+            for attempt in range(5):
+                captured_data = sb.execute_script("return window.capturedAPIData;")
+                if captured_data:
+                    print(f"   ✓ API response captured successfully! (attempt {attempt + 1})")
+                    return captured_data
+                sb.sleep(1)
+            
+            print("   ⚠ No API data captured after 5 attempts")
+            
+            # Fallback: try to find it in window/sessionStorage
+            try:
+                storage_data = sb.execute_script("""
+                    // Check if data is stored anywhere
+                    for (let i = 0; i < sessionStorage.length; i++) {
+                        let key = sessionStorage.key(i);
+                        let value = sessionStorage.getItem(key);
+                        try {
+                            let parsed = JSON.parse(value);
+                            if (parsed && parsed.data && parsed.data.containers) {
+                                return parsed;
+                            }
+                        } catch(e) {}
+                    }
+                    return null;
+                """)
+                
+                if storage_data:
+                    print("   ✓ Found API data in sessionStorage!")
+                    return storage_data
+            except:
+                pass
+            
+            print("   ⚠ Target API not found")
+            return None
+            
         except Exception as e:
             print(f"   ⚠ Error capturing API response: {e}")
             return None
