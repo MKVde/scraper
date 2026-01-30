@@ -1,27 +1,17 @@
-#!/usr/bin/env python3
-"""
-SeaRates API Scraper - Full API Capture
-Uses Selenium with CDP to capture the complete tracking API response
-"""
-
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 import json
 import time
 import sys
-import os
-import requests
-from datetime import datetime
 
-
-def scrape_searates_api(tracking_number):
+def scrape_searates_api(tracking_number, keep_browser_open=False):
     """
-    Scrape SeaRates tracking API using CDP network capture
-    Returns the full API JSON response
+    Scrape SeaRates tracking API - Automated mode for CI/CD
     """
     chrome_options = Options()
     
-    # Required for GitHub Actions headless mode
+    # Required for GitHub Actions
     chrome_options.add_argument('--headless=new')
     chrome_options.add_argument('--disable-gpu')
     chrome_options.add_argument('--no-sandbox')
@@ -29,18 +19,18 @@ def scrape_searates_api(tracking_number):
     chrome_options.add_argument('--window-size=1920,1080')
     chrome_options.add_argument('--disable-extensions')
     
-    # Enable performance logging for CDP
+    # Enable performance logging
     chrome_options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
     
     driver = webdriver.Chrome(options=chrome_options)
     
     try:
         # Open tracking page
-        url = f"https://www.searates.com/container/tracking/?number={tracking_number}&sealine=AUTO&shipment-type=sea"
-        print(f"[+] Opening: {url}")
-        driver.get(url)
+        main_url = f"https://www.searates.com/container/tracking/?number={tracking_number}&sealine=AUTO&shipment-type=sea"
+        print(f"[+] Opening: {main_url}")
+        driver.get(main_url)
         
-        # Wait for API call to complete
+        # Wait for API call
         print("[+] Waiting for API response...")
         time.sleep(8)
         
@@ -52,7 +42,7 @@ def scrape_searates_api(tracking_number):
         target_request_id = None
         found_url = None
         
-        # Find the API request in logs
+        # Find the API request
         for log in logs:
             try:
                 message = json.loads(log['message'])['message']
@@ -64,12 +54,12 @@ def scrape_searates_api(tracking_number):
                     if target_api in response_url and response.get('status') == 200:
                         target_request_id = params['requestId']
                         found_url = response_url
-                        print(f"[✓] Found API: {response_url[:80]}...")
+                        print(f"[✓] Found API: {response_url}")
                         break
             except:
                 continue
         
-        # Get response body using CDP
+        # Get response body
         if target_request_id:
             try:
                 response_body = driver.execute_cdp_cmd('Network.getResponseBody', {
@@ -84,6 +74,23 @@ def scrape_searates_api(tracking_number):
                 
                 if is_valid:
                     print("[✓] Response structure is correct!")
+                    
+                    # Save full response
+                    output_file = f"tracking_{tracking_number}_full.json"
+                    with open(output_file, 'w', encoding='utf-8') as f:
+                        json.dump(api_data, f, indent=2, ensure_ascii=False)
+                    print(f"[✓] Saved to: {output_file}")
+                    
+                    # Extract and save key info
+                    extracted = extract_key_info(api_data)
+                    extracted_file = f"tracking_{tracking_number}_summary.json"
+                    with open(extracted_file, 'w', encoding='utf-8') as f:
+                        json.dump(extracted, f, indent=2, ensure_ascii=False)
+                    print(f"[✓] Saved summary to: {extracted_file}")
+                    
+                    # Display summary
+                    print_summary(extracted)
+                    
                     return api_data
                 else:
                     print("[!] Warning: Response structure doesn't match expected format")
@@ -91,10 +98,10 @@ def scrape_searates_api(tracking_number):
                     return api_data
                     
             except Exception as e:
-                print(f"[✗] Error extracting response: {str(e)}")
+                print(f"[✗] Error: {str(e)}")
                 return None
         else:
-            print("[✗] Target API not found in network logs")
+            print("[✗] Target API not found")
             return None
             
     except Exception as e:
@@ -104,7 +111,7 @@ def scrape_searates_api(tracking_number):
     finally:
         print("\n[+] Closing browser...")
         driver.quit()
-
+        print("[+] Browser closed")
 
 def validate_response(data):
     """Validate API response has expected structure"""
@@ -122,147 +129,113 @@ def validate_response(data):
     expected_data_keys = ['metadata', 'locations', 'route', 'vessels', 'containers']
     return all(key in data_section for key in expected_data_keys)
 
-
-def send_to_php_api(api_data, php_url, api_key):
-    """Send the full API data to PHP endpoint"""
-    try:
-        print(f"\n[+] Sending data to PHP API...")
-        
-        headers = {
-            'X-API-KEY': api_key,
-            'Content-Type': 'application/json'
-        }
-        
-        response = requests.post(
-            php_url,
-            headers=headers,
-            json=api_data,
-            timeout=30
-        )
-        
-        print(f"[+] Response status: {response.status_code}")
-        print(f"[+] Response body: {response.text}")
-        
-        return response.status_code == 200
-        
-    except Exception as e:
-        print(f"[✗] Failed to send to API: {str(e)}")
-        return False
-
-
-def print_summary(api_data):
-    """Print a formatted summary of tracking data"""
+def extract_key_info(api_data):
+    """Extract key information from API response"""
     data = api_data.get('data', {})
     metadata = data.get('metadata', {})
-    containers = data.get('containers', [])
-    vessels = data.get('vessels', [])
-    locations = {loc['id']: loc for loc in data.get('locations', [])}
     route = data.get('route', {})
     
-    # Get POL/POD
-    pol_id = route.get('pol', {}).get('location')
-    pod_id = route.get('pod', {}).get('location')
-    pol = locations.get(pol_id, {})
-    pod = locations.get(pod_id, {})
+    # Get location names
+    locations = {loc['id']: loc['name'] + ', ' + loc['country']
+                for loc in data.get('locations', [])}
     
+    # Extract route summary
+    route_summary = {}
+    if 'prepol' in route:
+        route_summary['origin'] = locations.get(route['prepol']['location'], 'Unknown')
+        route_summary['departure_date'] = route['prepol']['date']
+    
+    if 'pod' in route:
+        route_summary['destination'] = locations.get(route['pod']['location'], 'Unknown')
+        route_summary['eta'] = route['pod']['date']
+        route_summary['eta_predictive'] = route['pod'].get('predictive_eta')
+    
+    # Extract container info
+    containers_summary = []
+    for container in data.get('containers', []):
+        events = container.get('events', [])
+        latest_event = events[-1] if events else {}
+        
+        containers_summary.append({
+            'number': container['number'],
+            'type': container.get('size_type', 'Unknown'),
+            'status': container['status'],
+            'latest_event': {
+                'description': latest_event.get('description'),
+                'date': latest_event.get('date'),
+                'location': locations.get(latest_event.get('location'), 'Unknown')
+            }
+        })
+    
+    # Extract vessel info
+    vessels_summary = [
+        {
+            'name': v['name'],
+            'imo': v.get('imo'),
+            'flag': v.get('flag')
+        }
+        for v in data.get('vessels', [])
+    ]
+    
+    return {
+        'tracking_number': metadata.get('number'),
+        'shipping_line': metadata.get('sealine_name'),
+        'status': metadata.get('status'),
+        'updated_at': metadata.get('updated_at'),
+        'route': route_summary,
+        'containers': containers_summary,
+        'vessels': vessels_summary,
+        'total_containers': len(containers_summary)
+    }
+
+def print_summary(extracted):
+    """Print a formatted summary of tracking data"""
     print("\n" + "="*60)
     print("TRACKING SUMMARY")
     print("="*60)
-    print(f"BOL Number: {metadata.get('number')}")
-    print(f"Shipping Line: {metadata.get('sealine_name')} ({metadata.get('sealine')})")
-    print(f"Status: {metadata.get('status')}")
-    print(f"Updated: {metadata.get('updated_at')}")
+    print(f"Tracking Number: {extracted['tracking_number']}")
+    print(f"Shipping Line: {extracted['shipping_line']}")
+    print(f"Status: {extracted['status']}")
+    print(f"Updated: {extracted['updated_at']}")
     
     print("\n--- ROUTE ---")
-    print(f"From: {pol.get('name', 'N/A')}, {pol.get('country', '')}")
-    print(f"To: {pod.get('name', 'N/A')}, {pod.get('country', '')}")
-    print(f"ETD: {route.get('pol', {}).get('date', 'N/A')}")
-    print(f"ETA: {route.get('pod', {}).get('date', 'N/A')}")
+    route = extracted['route']
+    print(f"From: {route.get('origin')}")
+    print(f"To: {route.get('destination')}")
+    print(f"Departure: {route.get('departure_date')}")
+    print(f"ETA: {route.get('eta')}")
     
-    print(f"\n--- CONTAINERS ({len(containers)}) ---")
-    for idx, container in enumerate(containers[:3], 1):
-        print(f"{idx}. {container.get('number')} - {container.get('size_type')} - {container.get('status')}")
-    if len(containers) > 3:
-        print(f"... and {len(containers) - 3} more containers")
+    print(f"\n--- CONTAINERS ({extracted['total_containers']}) ---")
+    for idx, container in enumerate(extracted['containers'][:3], 1):
+        print(f"\n{idx}. {container['number']}")
+        print(f"   Type: {container['type']}")
+        print(f"   Status: {container['status']}")
+        print(f"   Latest: {container['latest_event']['description']}")
+        print(f"   Date: {container['latest_event']['date']}")
+        print(f"   Location: {container['latest_event']['location']}")
+    
+    if extracted['total_containers'] > 3:
+        print(f"\n... and {extracted['total_containers'] - 3} more containers")
     
     print("\n--- VESSELS ---")
-    for vessel in vessels:
-        imo = vessel.get('imo') or 'N/A'
-        print(f"- {vessel.get('name')} (IMO: {imo}, Flag: {vessel.get('flag', 'N/A')})")
+    for vessel in extracted['vessels']:
+        print(f"- {vessel['name']} (IMO: {vessel['imo']}, Flag: {vessel['flag']})")
     
-    print("="*60)
+    print("\n" + "="*60)
 
-
-def main():
-    """Main entry point"""
-    # Get tracking number from argument or bol_list.txt
-    if len(sys.argv) > 1:
-        tracking_numbers = [sys.argv[1]]
-    else:
-        try:
-            with open('bol_list.txt', 'r') as f:
-                tracking_numbers = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-        except FileNotFoundError:
-            print("[!] No tracking number provided and bol_list.txt not found")
-            sys.exit(1)
-    
-    # Get API credentials from environment
-    php_url = os.environ.get('PHP_API_URL', '')
-    php_api_key = os.environ.get('PHP_API_KEY', '')
-    
-    print("="*60)
-    print("SeaRates API Scraper - Full API Capture")
-    print("="*60)
-    print(f"Tracking {len(tracking_numbers)} BOL(s)")
-    
-    # Create results directory
-    os.makedirs('results', exist_ok=True)
-    
-    success_count = 0
-    
-    for tracking_number in tracking_numbers:
-        print(f"\n{'='*60}")
-        print(f"Processing: {tracking_number}")
-        print("="*60)
-        
-        # Scrape the API
-        api_data = scrape_searates_api(tracking_number)
-        
-        if api_data:
-            # Print summary
-            print_summary(api_data)
-            
-            # Save to file
-            output_file = f"results/tracking_{tracking_number}_full.json"
-            with open(output_file, 'w', encoding='utf-8') as f:
-                json.dump(api_data, f, indent=2, ensure_ascii=False)
-            print(f"\n[✓] Saved to: {output_file}")
-            
-            # Send to PHP API if credentials are set
-            if php_url and php_api_key:
-                if send_to_php_api(api_data, php_url, php_api_key):
-                    print("[✓] Successfully sent to PHP API")
-                    success_count += 1
-                else:
-                    print("[✗] Failed to send to PHP API")
-            else:
-                print("[!] PHP API credentials not set - skipping API send")
-                success_count += 1  # Still count as success if file was saved
-        else:
-            print(f"\n[✗] Failed to scrape: {tracking_number}")
-        
-        # Wait between requests
-        if len(tracking_numbers) > 1:
-            print("\n[+] Waiting 10 seconds before next request...")
-            time.sleep(10)
-    
-    print(f"\n{'='*60}")
-    print(f"COMPLETED: {success_count}/{len(tracking_numbers)} successful")
-    print("="*60)
-    
-    # Exit with appropriate code
-    sys.exit(0 if success_count > 0 else 1)
-
-
+# Main execution
 if __name__ == "__main__":
-    main()
+    tracking_number = sys.argv[1] if len(sys.argv) > 1 else "3100124492"
+    
+    print("="*60)
+    print("SeaRates Tracking API Scraper (Automated)")
+    print("="*60)
+    
+    api_data = scrape_searates_api(tracking_number, keep_browser_open=False)
+    
+    if api_data:
+        print("\n[✓] SUCCESS! Data saved to JSON files.")
+        sys.exit(0)
+    else:
+        print("\n[✗] Failed to scrape data")
+        sys.exit(1)

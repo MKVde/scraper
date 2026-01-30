@@ -1,101 +1,57 @@
-name: SeaRates Tracking Scraper
+name: SeaRates Scraper
 
 on:
-  # Run every 6 hours
-  schedule:
-    - cron: '0 */6 * * *'
-  
-  # Manual trigger with optional BOL number
   workflow_dispatch:
     inputs:
       tracking_number:
-        description: 'BOL/Tracking number (leave empty to use bol_list.txt)'
-        required: false
-        type: string
-  
-  # Trigger on BOL list changes
-  push:
-    branches: [main]
-    paths:
-      - 'bol_list.txt'
+        description: 'Tracking Number'
+        required: true
+        default: '3100124492'
+  schedule:
+    - cron: '0 8 * * *'
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
     
-    permissions:
-      contents: write
-    
     steps:
-      - name: 📥 Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       
-      - name: 📝 Prepare BOL list
-        if: github.event.inputs.tracking_number != ''
-        run: |
-          echo "Using provided tracking number: ${{ github.event.inputs.tracking_number }}"
-          echo "${{ github.event.inputs.tracking_number }}" > bol_list.txt
-      
-      - name: 🐍 Set up Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
       
-      - name: 🌐 Install Chrome
+      - name: Install Chrome
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: stable
       
-      - name: 📦 Install dependencies
+      - name: Install dependencies
         run: |
-          pip install --upgrade pip
-          pip install selenium requests
+          pip install selenium
       
-      - name: 🚀 Run scraper
-        env:
-          PHP_API_URL: ${{ secrets.PHP_API_URL }}
-          PHP_API_KEY: ${{ secrets.PHP_API_KEY }}
-        run: |
-          python searates_scraper.py
+      - name: Create results directory
+        run: mkdir -p results
       
-      - name: 💾 Commit and push results
+      - name: Run scraper
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Add results
-          git add results/ 2>/dev/null || true
-          
-          # Check for changes
-          if git diff --quiet && git diff --staged --quiet; then
-            echo "ℹ️ No changes to commit"
-          else
-            # Get BOL number for commit message
-            BOL_NUM=$(head -1 bol_list.txt 2>/dev/null | tr -d '\n' || echo "unknown")
-            TIMESTAMP=$(date +'%Y-%m-%d %H:%M:%S UTC')
-            
-            git commit -m "📦 Update tracking: ${BOL_NUM} (${TIMESTAMP})"
-            
-            # Push with retry
-            for i in 1 2 3; do
-              echo "🚀 Push attempt $i/3..."
-              if git push origin main; then
-                echo "✅ Pushed successfully!"
-                break
-              fi
-              if [ $i -lt 3 ]; then
-                echo "⚠️ Push failed, retrying in 5s..."
-                sleep 5
-                git pull --rebase origin main || true
-              fi
-            done
-          fi
+          python searates_scraper.py ${{ github.event.inputs.tracking_number || '3100124492' }}
+          # Move results to results directory
+          mv tracking_*.json results/ 2>/dev/null || true
+      
+      - name: Commit and push results
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add results/
+          git diff --quiet && git diff --staged --quiet || git commit -m "📦 Update tracking data: $(date +'%Y-%m-%d %H:%M:%S')"
+          git push
         continue-on-error: true
       
-      - name: 📤 Upload artifacts
+      - name: Upload artifacts (backup)
         uses: actions/upload-artifact@v4
         if: always()
         with:
