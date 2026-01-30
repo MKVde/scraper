@@ -1,49 +1,148 @@
-- name: 📡 Send HTML data to PHP API
-  if: success()
-  env:
-    PHP_API_URL: ${{ secrets.PHP_API_URL }}
-    PHP_API_KEY: ${{ secrets.PHP_API_KEY }}
-  run: |
-    if [ -z "$PHP_API_URL" ] || [ -z "$PHP_API_KEY" ]; then
-      echo "⚠️ API credentials not set"
-      exit 0
-    fi
+name: SeaRates Container Tracker
+
+on:
+  schedule:
+    - cron: '0 3 */3 * *'
+  workflow_dispatch:
+    inputs:
+      bol_number:
+        description: 'BOL number to track (leave empty to use bol_list.txt)'
+        required: false
+        type: string
+  push:
+    branches: [ main ]
+    paths:
+      - 'bol_list.txt'
+      - 'searates_scraper.py'
+      - 'requirements.txt'
+
+jobs:
+  scrape-searates:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
     
-    # Find latest COMBINED file (has both HTML + API data)
-    LATEST_COMBINED=$(ls -t data/searates_[0-9]*_[0-9]*.json 2>/dev/null | grep -v 'api_' | head -1)
-    
-    if [ -n "$LATEST_COMBINED" ]; then
-      echo "📤 Sending combined data: $(basename $LATEST_COMBINED)"
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       
-      RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$PHP_API_URL" \
-        -H "X-API-KEY: $PHP_API_KEY" \
-        -H "Content-Type: application/json" \
-        -d @"$LATEST_COMBINED")
+      - name: 📝 Prepare BOL list (if provided)
+        if: github.event.inputs.bol_number != ''
+        run: |
+          echo "Tracking BOL: ${{ github.event.inputs.bol_number }}"
+          echo "${{ github.event.inputs.bol_number }}" > bol_list.txt
       
-      HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-      BODY=$(echo "$RESPONSE" | head -n -1)
+      - name: 🐍 Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
       
-      echo "Response: $BODY"
-      echo "HTTP Code: $HTTP_CODE"
+      - name: 🌐 Install Google Chrome
+        run: |
+          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq google-chrome-stable
+          google-chrome --version
       
-      if [ "$HTTP_CODE" = "200" ]; then
-        echo "✅ Success!"
-      else
-        echo "⚠️ Failed with status $HTTP_CODE"
-      fi
-    else
-      echo "⚠️ No combined file found"
-    fi
-    
-    # Show what was saved
-    echo ""
-    echo "📁 Files saved in this run:"
-    echo ""
-    echo "API responses (40KB JSON):"
-    ls -lh data/searates_api_*.json 2>/dev/null | tail -3 || echo "  (none)"
-    echo ""
-    echo "Combined data (API + HTML):"
-    ls -lh data/searates_[0-9]*.json 2>/dev/null | grep -v 'api_' | tail -3 || echo "  (none)"
-    echo ""
-    echo "Reports:"
-    ls -lh data/*_report.txt 2>/dev/null | tail -3 || echo "  (none)"
+      - name: 📦 Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: 🚀 Run SeaRates scraper
+        run: python searates_scraper.py
+      
+      - name: 📡 Send data to PHP API
+        if: success()
+        env:
+          PHP_API_URL: ${{ secrets.PHP_API_URL }}
+          PHP_API_KEY: ${{ secrets.PHP_API_KEY }}
+        run: |
+          if [ -z "$PHP_API_URL" ] || [ -z "$PHP_API_KEY" ]; then
+            echo "⚠️ API credentials not set"
+            exit 0
+          fi
+          
+          LATEST_COMBINED=$(ls -t data/searates_[0-9]*_[0-9]*.json 2>/dev/null | grep -v 'api_' | head -1)
+          
+          if [ -n "$LATEST_COMBINED" ]; then
+            echo "📤 Sending: $(basename $LATEST_COMBINED)"
+            
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$PHP_API_URL" \
+              -H "X-API-KEY: $PHP_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d @"$LATEST_COMBINED")
+            
+            HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+            BODY=$(echo "$RESPONSE" | head -n -1)
+            
+            echo "Response: $BODY"
+            echo "HTTP Code: $HTTP_CODE"
+            
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Success!"
+            else
+              echo "⚠️ Failed with status $HTTP_CODE"
+            fi
+          else
+            echo "⚠️ No combined file found"
+          fi
+          
+          echo ""
+          echo "📁 Files saved:"
+          echo "API responses:"
+          ls -lh data/searates_api_*.json 2>/dev/null | tail -3 || echo "  (none)"
+          echo "Combined data:"
+          ls -lh data/searates_[0-9]*.json 2>/dev/null | grep -v 'api_' | tail -3 || echo "  (none)"
+      
+      - name: 💾 Commit and push results
+        run: |
+          git config user.name "SeaRates Bot"
+          git config user.email "bot@searates-scraper.github.io"
+          
+          echo "🔄 Pulling latest..."
+          git pull --rebase origin main || echo "⚠️ Pull failed"
+          
+          git add data/ *.png 2>/dev/null || true
+          
+          if git diff --quiet && git diff --staged --quiet; then
+            echo "ℹ️ No changes to commit"
+          else
+            BOL_NUM=$(head -1 bol_list.txt 2>/dev/null || echo "unknown")
+            git commit -m "📊 Update: $(date +'%Y-%m-%d %H:%M') [BOL: $BOL_NUM]"
+            
+            for i in 1 2 3; do
+              echo "🚀 Push attempt $i/3..."
+              if git push origin main; then
+                echo "✅ Pushed successfully!"
+                exit 0
+              fi
+              
+              if [ $i -lt 3 ]; then
+                echo "⚠️ Retrying in 5 seconds..."
+                sleep 5
+                git pull --rebase origin main || true
+              fi
+            done
+            
+            echo "❌ Push failed after 3 attempts"
+            exit 1
+          fi
+      
+      - name: 📤 Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scraping-results-${{ github.run_number }}
+          path: |
+            data/
+            *.png
+          retention-days: 90
+      
+      - name: 📧 Notify on failure
+        if: failure()
+        run: echo "⚠️ Workflow failed! Check logs."
