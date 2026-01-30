@@ -2,8 +2,8 @@
 
 """
 SeaRates Scraper for GitHub Actions
-Automated container tracking with Cloudflare bypass + API Response Capture
-OPTIMIZED: Single page load for both HTML and API capture
+Automated container tracking with Cloudflare bypass + FULL API Response Capture
+ADVANCED: Uses CDP Network Interception to capture 40KB API response
 """
 
 import os
@@ -22,8 +22,8 @@ class SeaRatesScraper:
 
     def track_bol_with_api(self, bol_number, sealine="AUTO"):
         """
-        COMBINED METHOD: Track shipment AND capture API in ONE browser session
-        This saves your free daily search limit!
+        COMBINED METHOD: Track shipment AND capture FULL API in ONE browser session
+        Uses CDP Network Interception for 40KB API capture!
         """
         with SB(uc=True, headless=True, xvfb=True) as sb:
             self.sb = sb
@@ -36,13 +36,9 @@ class SeaRatesScraper:
                 
                 url = f"https://www.searates.com/container/tracking/?number={bol_number}&sealine={sealine}&shipment-type=sea"
                 
-                # STEP 1: Enable network monitoring BEFORE opening page
-                print("[1/9] Enabling network monitoring...")
-                try:
-                    sb.driver.execute_cdp_cmd('Network.enable', {})
-                    print("   ✓ Network monitoring enabled")
-                except Exception as e:
-                    print(f"   ⚠ CDP not available: {e}")
+                # STEP 1: Inject XHR interceptor BEFORE page loads
+                print("[1/9] Setting up API interceptor...")
+                self._inject_xhr_interceptor(sb)
                 
                 # STEP 2: Open page with Cloudflare bypass
                 print("[2/9] Opening page with Cloudflare bypass...")
@@ -53,7 +49,7 @@ class SeaRatesScraper:
                 sb.sleep(3)
                 
                 print("[4/9] Waiting for tracking data + API calls...")
-                sb.sleep(8)  # Wait for both HTML rendering AND API calls
+                sb.sleep(10)  # Give API time to be captured
                 
                 # STEP 3: Extract HTML data
                 print("[5/9] Extracting basic tracking information...")
@@ -77,8 +73,8 @@ class SeaRatesScraper:
                 except Exception as e:
                     print(f"   ⚠ Could not access Containers tab: {e}")
                 
-                # STEP 6: Capture API response (using Chrome DevTools Protocol)
-                print("\n[8/9] Capturing API response...")
+                # STEP 6: Capture API response (using CDP interception)
+                print("\n[8/9] Capturing API response (40KB)...")
                 api_data = self._capture_api_from_session(sb, bol_number)
                 tracking_data['api_response'] = api_data
                 
@@ -102,136 +98,226 @@ class SeaRatesScraper:
                     pass
                 return {'error': str(e), 'screenshot': screenshot}
 
+    def _inject_xhr_interceptor(self, sb):
+        """
+        Inject XHR interceptor BEFORE page loads
+        This captures the API response automatically when it's called
+        """
+        intercept_script = """
+        (function() {
+            console.log('[SEARATES] Injecting XHR interceptor...');
+            
+            // Store original XMLHttpRequest and fetch
+            const originalXHR = {
+                open: XMLHttpRequest.prototype.open,
+                send: XMLHttpRequest.prototype.send
+            };
+            
+            const originalFetch = window.fetch;
+            
+            // Override XMLHttpRequest
+            XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+                this._url = url;
+                this._method = method;
+                return originalXHR.open.call(this, method, url, ...rest);
+            };
+            
+            XMLHttpRequest.prototype.send = function(...args) {
+                this.addEventListener('load', function() {
+                    if (this._url && this._url.includes('tracking-system/reverse/tracking')) {
+                        try {
+                            const response = JSON.parse(this.responseText);
+                            window.__SEARATES_API_RESPONSE__ = response;
+                            window.__SEARATES_API_CAPTURED_AT__ = new Date().toISOString();
+                            console.log('[SEARATES] ✓ API Response Captured!', Object.keys(response));
+                        } catch(e) {
+                            console.error('[SEARATES] Failed to parse API response:', e);
+                        }
+                    }
+                });
+                return originalXHR.send.call(this, ...args);
+            };
+            
+            // Override fetch
+            window.fetch = function(url, ...args) {
+                return originalFetch.call(this, url, ...args).then(response => {
+                    if (url.includes('tracking-system/reverse/tracking')) {
+                        response.clone().json().then(data => {
+                            window.__SEARATES_API_RESPONSE__ = data;
+                            window.__SEARATES_API_CAPTURED_AT__ = new Date().toISOString();
+                            console.log('[SEARATES] ✓ API Response Captured via Fetch!', Object.keys(data));
+                        }).catch(e => {
+                            console.error('[SEARATES] Failed to clone fetch response:', e);
+                        });
+                    }
+                    return response;
+                });
+            };
+            
+            console.log('[SEARATES] ✓ XHR/Fetch interceptor ready');
+        })();
+        """
+        
+        try:
+            # Method 1: Try CDP injection (best)
+            sb.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+                'source': intercept_script
+            })
+            print("   ✓ CDP XHR interceptor injected")
+        except Exception as e:
+            print(f"   ⚠ CDP injection failed: {e}")
+            # Method 2: Fallback to manual injection after load
+            try:
+                sb.driver.execute_script(intercept_script)
+                print("   ✓ Manual XHR interceptor injected")
+            except Exception as e2:
+                print(f"   ✗ All injection methods failed: {e2}")
+
     def _capture_api_from_session(self, sb, bol_number):
         """
-        Capture API response that already loaded in the page
-        Extract from browser's internal state instead of making new request
+        Capture the FULL 40KB API response that was intercepted
         """
         try:
-            # Method 1: Extract from window.__NUXT__ or similar global state
-            print("   [+] Checking window objects...")
+            print("   [+] Checking for captured API response...")
             
-            window_check_script = """
-            // Check common places where React/Next.js/Nuxt store data
-            const checks = [];
+            # Wait up to 20 seconds for API to be captured
+            api_data = None
+            for attempt in range(20):
+                check_script = """
+                return {
+                    response: window.__SEARATES_API_RESPONSE__ || null,
+                    capturedAt: window.__SEARATES_API_CAPTURED_AT__ || null
+                };
+                """
+                
+                result = sb.driver.execute_script(check_script)
+                api_data = result.get('response') if result else None
+                captured_at = result.get('capturedAt') if result else None
+                
+                if api_data:
+                    print(f"   ✓ API captured at: {captured_at}")
+                    break
+                
+                # Show progress
+                if attempt % 5 == 0 and attempt > 0:
+                    print(f"   ⏳ Still waiting... ({attempt}s)")
+                
+                time.sleep(1)
             
-            // Check __NEXT_DATA__
-            if (window.__NEXT_DATA__) {
-                checks.push({source: '__NEXT_DATA__', data: window.__NEXT_DATA__});
-            }
-            
-            // Check __NUXT__
-            if (window.__NUXT__) {
-                checks.push({source: '__NUXT__', data: window.__NUXT__});
-            }
-            
-            // Check Redux store
-            if (window.__REDUX_DEVTOOLS_EXTENSION__) {
-                try {
-                    const state = window.__REDUX_DEVTOOLS_EXTENSION__.getState();
-                    checks.push({source: 'redux', data: state});
-                } catch(e) {}
-            }
-            
-            // Check for tracking data in data attributes
-            const trackingCards = document.querySelectorAll('[data-tracking-data]');
-            if (trackingCards.length > 0) {
-                try {
-                    const data = JSON.parse(trackingCards[0].getAttribute('data-tracking-data'));
-                    checks.push({source: 'data-attribute', data: data});
-                } catch(e) {}
-            }
-            
-            return checks;
-            """
-            
-            window_data = sb.driver.execute_script(window_check_script)
-            
-            if window_data and len(window_data) > 0:
-                for item in window_data:
-                    print(f"   ✓ Found data in {item['source']}")
-                    # Try to extract tracking data from the structure
-                    extracted = self._extract_tracking_from_window_data(item['data'])
-                    if extracted:
-                        return {
-                            'success': True,
-                            'source': f"window_{item['source']}",
-                            'data': extracted,
-                            'captured_at': datetime.now().isoformat()
-                        }
-            
-            # Method 2: Parse from page HTML/JSON embedded data
-            print("   [+] Checking embedded JSON...")
-            
-            json_script = """
-            // Look for JSON-LD or embedded JSON in script tags
-            const scripts = document.querySelectorAll('script[type="application/json"]');
-            const jsonData = [];
-            
-            for (let script of scripts) {
-                try {
-                    const data = JSON.parse(script.textContent);
-                    if (data && typeof data === 'object') {
-                        jsonData.push(data);
+            # Validate and return
+            if api_data and isinstance(api_data, dict):
+                # Check if it's a success response
+                if api_data.get('status') == 'success' and 'data' in api_data:
+                    data_size = len(json.dumps(api_data))
+                    print(f"   ✓ FULL API Response Captured! ({data_size:,} bytes)")
+                    
+                    # Show summary
+                    metadata = api_data.get('data', {}).get('metadata', {})
+                    containers = api_data.get('data', {}).get('containers', [])
+                    print(f"   ✓ Containers with events: {len(containers)}")
+                    print(f"   ✓ Shipping line: {metadata.get('sealine_name', 'N/A')}")
+                    
+                    return {
+                        'success': True,
+                        'source': 'cdp_xhr_intercept',
+                        'data': api_data,
+                        'captured_at': captured_at or datetime.now().isoformat(),
+                        'size_bytes': data_size
                     }
-                } catch(e) {}
-            }
+                
+                # Check if rate limited
+                elif api_data.get('message') == 'API_KEY_LIMIT_REACHED':
+                    print("   ⚠ SeaRates API rate limit reached")
+                    print("   ℹ️ Free tier: 1 search/day")
+                    return {
+                        'success': False,
+                        'error': 'API_KEY_LIMIT_REACHED',
+                        'note': 'SeaRates free tier limit (1 unique search per day)',
+                        'raw_response': api_data
+                    }
+                
+                # Unknown response format
+                else:
+                    print(f"   ⚠ Unexpected API format: {list(api_data.keys())}")
+                    return {
+                        'success': False,
+                        'error': 'Unexpected response format',
+                        'raw_response': api_data
+                    }
             
-            return jsonData;
-            """
+            # No API captured - try alternative methods
+            print("   ⚠ Primary capture failed, trying alternatives...")
             
-            embedded_json = sb.driver.execute_script(json_script)
+            # Alternative 1: Check performance entries
+            try:
+                perf_script = """
+                const entries = performance.getEntries()
+                    .filter(e => e.name && e.name.includes('tracking-system/reverse/tracking'));
+                return entries.length > 0 ? entries[0].name : null;
+                """
+                api_url = sb.driver.execute_script(perf_script)
+                
+                if api_url:
+                    print(f"   ✓ Found API URL in performance: {api_url[:80]}...")
+                    # Note: We can't re-fetch it (would waste another API call)
+                    return {
+                        'success': False,
+                        'error': 'API URL found but not captured',
+                        'note': 'Response body was not intercepted',
+                        'api_url': api_url
+                    }
+            except Exception as e:
+                print(f"   ⚠ Performance check failed: {e}")
             
-            if embedded_json and len(embedded_json) > 0:
-                for data in embedded_json:
-                    if isinstance(data, dict) and 'containers' in str(data).lower():
-                        print(f"   ✓ Found embedded tracking data")
-                        return {
-                            'success': True,
-                            'source': 'embedded_json',
-                            'data': data,
-                            'captured_at': datetime.now().isoformat()
+            # Alternative 2: Check if data is in DOM
+            try:
+                dom_script = """
+                const scripts = document.querySelectorAll('script[type="application/json"]');
+                for (let script of scripts) {
+                    try {
+                        const data = JSON.parse(script.textContent);
+                        if (data && data.containers) {
+                            return data;
                         }
+                    } catch(e) {}
+                }
+                return null;
+                """
+                dom_data = sb.driver.execute_script(dom_script)
+                
+                if dom_data:
+                    print("   ✓ Found tracking data in DOM!")
+                    return {
+                        'success': True,
+                        'source': 'dom_json',
+                        'data': dom_data,
+                        'captured_at': datetime.now().isoformat()
+                    }
+            except Exception as e:
+                print(f"   ⚠ DOM check failed: {e}")
             
-            # Method 3: If all else fails, note that HTML scraping worked
-            print("   ⚠ Could not extract API format")
+            # Final fallback
+            print("   ⚠ Could not capture API response")
             print("   ℹ️ HTML scraping captured all visible data")
             return {
                 'success': False,
-                'error': 'API format not accessible',
-                'note': 'All tracking data was captured via HTML scraping'
+                'error': 'API capture methods exhausted',
+                'note': 'All tracking data was captured via HTML scraping',
+                'reason': 'Possible rate limit, API structure changed, or interception blocked'
             }
             
         except Exception as e:
             print(f"   ⚠ Capture error: {e}")
+            import traceback
+            traceback.print_exc()
             return {
                 'success': False,
                 'error': str(e),
                 'note': 'HTML data captured successfully'
             }
 
-    def _extract_tracking_from_window_data(self, data):
-        """Helper to extract tracking data from window objects"""
-        try:
-            # Try different possible structures
-            if isinstance(data, dict):
-                # Check if it's the API response format
-                if 'data' in data and 'containers' in data.get('data', {}):
-                    return data
-                
-                # Check nested structures
-                for key in ['props', 'pageProps', 'initialState', 'tracking', 'shipment']:
-                    if key in data:
-                        nested = data[key]
-                        if isinstance(nested, dict) and 'containers' in nested:
-                            return {'status': 'success', 'data': nested}
-            
-            return None
-        except:
-            return None
-
     def _extract_basic_data(self, sb):
-        """Extract all basic tracking information"""
+        """Extract all basic tracking information from HTML"""
         soup = BeautifulSoup(sb.get_page_source(), 'html.parser')
         
         data = {
@@ -474,7 +560,7 @@ def main():
         bol_numbers = ["3100124492"]
     
     print("\n" + "="*70)
-    print("SEARATES SCRAPER - OPTIMIZED (Single Page Load)")
+    print("SEARATES SCRAPER - ADVANCED (CDP API CAPTURE)")
     print("="*70)
     print(f"Processing {len(bol_numbers)} BOL(s)\n")
     
@@ -484,7 +570,7 @@ def main():
     for bol in bol_numbers:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
-        # COMBINED: HTML + API in ONE browser session
+        # COMBINED: HTML + FULL API in ONE browser session
         results = scraper.track_bol_with_api(bol, "AUTO")
         
         if 'error' not in results:
@@ -497,23 +583,27 @@ def main():
             print(f"Route: {results.get('origin', 'N/A')} → {results.get('destination', 'N/A')}")
             print(f"Vessels: {len(results.get('vessels', []))}")
             print(f"Events: {len(results.get('route_events', []))}")
+            print(f"Containers: {len(results.get('containers', []))}")
             
-            # Check if API was captured
+            # Check if FULL API was captured
             api_resp = results.get('api_response', {})
             if api_resp.get('success'):
-                print(f"API Captured: ✓ Yes (via {api_resp.get('source')})")
+                size = api_resp.get('size_bytes', 0)
+                print(f"API Captured: ✓ YES! ({size:,} bytes via {api_resp.get('source')})")
             else:
-                print(f"API Captured: ✗ No ({api_resp.get('error', 'unknown')})")
+                error = api_resp.get('error', 'unknown')
+                print(f"API Captured: ✗ No ({error})")
             
             # Save HTML data
             save_results(results, f"searates_html_{bol}_{timestamp}")
             
-            # Save API data separately if captured
-            if api_resp.get('success'):
-                api_file = f"data/searates_api_{bol}_{timestamp}.json"
+            # Save FULL API data separately if captured
+            if api_resp.get('success') and api_resp.get('data'):
+                api_file = f"data/searates_api_FULL_{bol}_{timestamp}.json"
                 with open(api_file, 'w', encoding='utf-8') as f:
-                    json.dump(api_resp, f, indent=2, ensure_ascii=False)
-                print(f"✓ API saved: {api_file}")
+                    json.dump(api_resp['data'], f, indent=2, ensure_ascii=False)
+                size = len(json.dumps(api_resp['data']))
+                print(f"✓ FULL API saved: {api_file} ({size:,} bytes)")
             
             all_results.append(results)
         else:
