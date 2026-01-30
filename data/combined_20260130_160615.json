@@ -1,0 +1,81 @@
+{
+  "bols": [
+    {
+      "reference_number": null,
+      "reference_type": null,
+      "status": null,
+      "carrier": null,
+      "container_count": 0,
+      "container_type": null,
+      "origin": null,
+      "destination": null,
+      "actual_departure": null,
+      "actual_arrival": null,
+      "estimated_departure": null,
+      "estimated_arrival": null,
+      "coordinates": {
+        "from": null,
+        "to": null
+      },
+      "route_events": [],
+      "vessels": [],
+      "containers": [
+        {
+          "container_number": "UETU2899371",
+          "type": null,
+          "size": null,
+          "status": null
+        },
+        {
+          "container_number": "SLVU3015669",
+          "type": null,
+          "size": null,
+          "status": null
+        },
+        {
+          "container_number": "BSIU2922461",
+          "type": null,
+          "size": null,
+          "status": null
+        },
+        {
+          "container_number": "SLVU3018631",
+          "type": null,
+          "size": null,
+          "status": null
+        },
+        {
+          "container_number": "TRHU3505295",
+          "type": null,
+          "size": null,
+          "status": null
+        },
+        {
+          "container_number": "HPCU2386705",
+          "type": null,
+          "size": null,
+          "status": null
+        },
+        {
+          "container_number": "SEKU1072333",
+          "type": null,
+          "size": null,
+          "status": null
+        },
+        {
+          "container_number": "HPCU2474299",
+          "type": null,
+          "size": null,
+          "status": null
+        }
+      ],
+      "scraped_at": "2026-01-30T16:05:38.609696",
+      "screenshot": "searates_3100124492_1769789159.png",
+      "api_response": {
+        "success": false,
+        "error": "Message: invalid argument: log type 'performance' not found\n  (Session info: chrome=144.0.7559.109)\nStacktrace:\n#0 0x55cfe9adbafa <unknown>\n#1 0x55cfe94f560f <unknown>\n#2 0x55cfe95898f6 <unknown>\n#3 0x55cfe953c842 <unknown>\n#4 0x55cfe953d631 <unknown>\n#5 0x55cfe9aa1689 <unknown>\n#6 0x55cfe9aa4581 <unknown>\n#7 0x55cfe9a8dca9 <unknown>\n#8 0x55cfe9aa513e <unknown>\n#9 0x55cfe9a743a0 <unknown>\n#10 0x55cfe9ac8fc8 <unknown>\n#11 0x55cfe9ac919b <unknown>\n#12 0x55cfe9adae68 <unknown>\n#13 0x7f740be9caa4 <unknown>\n#14 0x7f740bf29c6c <unknown>\n"
+      }
+    }
+  ],
+  "total": 1
+}
