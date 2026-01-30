@@ -1,13 +1,7 @@
 #!/usr/bin/env python3
 """
-SeaRates Tracking API Scraper
-Automated scraper for GitHub Actions - sends data to PHP API endpoint
-
-Features:
-- Captures full API response from SeaRates
-- Sends tracking data to FreightManager API
-- Supports multiple BOL numbers from bol_list.txt
-- Saves results locally as backup
+SeaRates API Scraper - Full API Capture
+Uses Selenium with CDP to capture the complete tracking API response
 """
 
 from selenium import webdriver
@@ -22,44 +16,43 @@ from datetime import datetime
 
 def scrape_searates_api(tracking_number):
     """
-    Scrape SeaRates tracking API and capture full response
+    Scrape SeaRates tracking API using CDP network capture
+    Returns the full API JSON response
     """
     chrome_options = Options()
     
-    # Required for GitHub Actions (headless mode)
+    # Required for GitHub Actions headless mode
     chrome_options.add_argument('--headless=new')
     chrome_options.add_argument('--disable-gpu')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--window-size=1920,1080')
     chrome_options.add_argument('--disable-extensions')
-    chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-    chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
     
-    # Enable performance logging to capture network traffic
+    # Enable performance logging for CDP
     chrome_options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
     
     driver = webdriver.Chrome(options=chrome_options)
     
     try:
         # Open tracking page
-        main_url = f"https://www.searates.com/container/tracking/?number={tracking_number}&sealine=AUTO&shipment-type=sea"
-        print(f"[+] Opening: {main_url}")
-        driver.get(main_url)
+        url = f"https://www.searates.com/container/tracking/?number={tracking_number}&sealine=AUTO&shipment-type=sea"
+        print(f"[+] Opening: {url}")
+        driver.get(url)
         
         # Wait for API call to complete
         print("[+] Waiting for API response...")
-        time.sleep(10)
+        time.sleep(8)
         
-        # Target API endpoint pattern
+        # Target API endpoint
         target_api = "tracking-system/reverse/tracking"
         
-        # Get performance logs to find API response
+        # Get performance logs
         logs = driver.get_log('performance')
         target_request_id = None
         found_url = None
         
-        # Find the API request in network logs
+        # Find the API request in logs
         for log in logs:
             try:
                 message = json.loads(log['message'])['message']
@@ -71,7 +64,7 @@ def scrape_searates_api(tracking_number):
                     if target_api in response_url and response.get('status') == 200:
                         target_request_id = params['requestId']
                         found_url = response_url
-                        print(f"[✓] Found API endpoint")
+                        print(f"[✓] Found API: {response_url[:80]}...")
                         break
             except:
                 continue
@@ -86,48 +79,30 @@ def scrape_searates_api(tracking_number):
                 api_data = json.loads(body_content)
                 
                 # Validate response structure
-                if validate_response(api_data):
-                    print("[✓] Valid API response captured!")
-                    return {
-                        'success': True,
-                        'data': api_data,
-                        'tracking_number': tracking_number,
-                        'captured_at': datetime.now().isoformat()
-                    }
+                print("\n[+] Validating response structure...")
+                is_valid = validate_response(api_data)
+                
+                if is_valid:
+                    print("[✓] Response structure is correct!")
+                    return api_data
                 else:
-                    print(f"[!] Invalid response structure: {api_data.get('message', 'unknown')}")
-                    return {
-                        'success': False,
-                        'error': api_data.get('message', 'Invalid response structure'),
-                        'tracking_number': tracking_number,
-                        'raw_response': api_data
-                    }
+                    print("[!] Warning: Response structure doesn't match expected format")
+                    print(f"[!] Keys found: {list(api_data.keys())}")
+                    return api_data
                     
             except Exception as e:
                 print(f"[✗] Error extracting response: {str(e)}")
-                return {
-                    'success': False,
-                    'error': str(e),
-                    'tracking_number': tracking_number
-                }
+                return None
         else:
-            print("[✗] API endpoint not found in network logs")
-            return {
-                'success': False,
-                'error': 'API endpoint not found',
-                'tracking_number': tracking_number
-            }
+            print("[✗] Target API not found in network logs")
+            return None
             
     except Exception as e:
         print(f"[✗] Unexpected error: {str(e)}")
-        return {
-            'success': False,
-            'error': str(e),
-            'tracking_number': tracking_number
-        }
+        return None
         
     finally:
-        print("[+] Closing browser...")
+        print("\n[+] Closing browser...")
         driver.quit()
 
 
@@ -136,253 +111,157 @@ def validate_response(data):
     if not isinstance(data, dict):
         return False
     
-    # Check top-level structure
+    expected_keys = ['status', 'message', 'data']
+    if not all(key in data for key in expected_keys):
+        return False
+    
     if data.get('status') != 'success':
         return False
     
-    # Check data section exists
     data_section = data.get('data', {})
-    if not data_section:
-        return False
-    
-    # Check required keys
-    expected_keys = ['metadata', 'locations', 'route', 'vessels', 'containers']
-    return all(key in data_section for key in expected_keys)
+    expected_data_keys = ['metadata', 'locations', 'route', 'vessels', 'containers']
+    return all(key in data_section for key in expected_data_keys)
 
 
-def send_to_api(api_data, api_url, api_key):
-    """
-    Send tracking data to PHP API endpoint
-    """
-    if not api_url or not api_key:
-        print("[!] API credentials not configured, skipping API send")
-        return None
-    
+def send_to_php_api(api_data, php_url, api_key):
+    """Send the full API data to PHP endpoint"""
     try:
-        print(f"[+] Sending to API: {api_url[:50]}...")
+        print(f"\n[+] Sending data to PHP API...")
         
-        # The full API response is sent directly
-        # The PHP endpoint expects the full JSON structure
+        headers = {
+            'X-API-KEY': api_key,
+            'Content-Type': 'application/json'
+        }
+        
         response = requests.post(
-            api_url,
-            headers={
-                'Content-Type': 'application/json',
-                'X-API-KEY': api_key
-            },
+            php_url,
+            headers=headers,
             json=api_data,
             timeout=30
         )
         
-        print(f"[+] API Response: {response.status_code}")
+        print(f"[+] Response status: {response.status_code}")
+        print(f"[+] Response body: {response.text}")
         
-        if response.status_code == 200:
-            result = response.json()
-            print(f"[✓] API Success: {result.get('status', 'unknown')}")
-            return result
-        else:
-            print(f"[✗] API Error: {response.text[:200]}")
-            return {'error': response.text, 'status_code': response.status_code}
-            
+        return response.status_code == 200
+        
     except Exception as e:
-        print(f"[✗] API Send Error: {str(e)}")
-        return {'error': str(e)}
+        print(f"[✗] Failed to send to API: {str(e)}")
+        return False
 
 
-def save_results(tracking_number, data, results_dir='results'):
-    """Save tracking data to JSON file"""
-    os.makedirs(results_dir, exist_ok=True)
-    
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
-    if data.get('success') and data.get('data'):
-        # Save full API response
-        filename = f"tracking_{tracking_number}_full.json"
-        filepath = os.path.join(results_dir, filename)
-        
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data['data'], f, indent=2, ensure_ascii=False)
-        
-        print(f"[✓] Saved: {filepath}")
-        
-        # Also save a summary
-        summary = extract_summary(data['data'])
-        summary_file = os.path.join(results_dir, f"tracking_{tracking_number}_summary.json")
-        with open(summary_file, 'w', encoding='utf-8') as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
-        
-        return filepath
-    else:
-        # Save error info
-        filename = f"tracking_{tracking_number}_error_{timestamp}.json"
-        filepath = os.path.join(results_dir, filename)
-        
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        
-        print(f"[!] Saved error: {filepath}")
-        return filepath
-
-
-def extract_summary(api_data):
-    """Extract key summary information from API response"""
+def print_summary(api_data):
+    """Print a formatted summary of tracking data"""
     data = api_data.get('data', {})
     metadata = data.get('metadata', {})
+    containers = data.get('containers', [])
+    vessels = data.get('vessels', [])
+    locations = {loc['id']: loc for loc in data.get('locations', [])}
     route = data.get('route', {})
     
-    # Build locations map
-    locations = {loc['id']: f"{loc['name']}, {loc['country_code']}"
-                for loc in data.get('locations', [])}
+    # Get POL/POD
+    pol_id = route.get('pol', {}).get('location')
+    pod_id = route.get('pod', {}).get('location')
+    pol = locations.get(pol_id, {})
+    pod = locations.get(pod_id, {})
     
-    # Get route info
-    pol_loc_id = route.get('pol', {}).get('location')
-    pod_loc_id = route.get('pod', {}).get('location')
-    
-    return {
-        'tracking_number': metadata.get('number'),
-        'status': metadata.get('status'),
-        'sealine': metadata.get('sealine_name'),
-        'sealine_code': metadata.get('sealine'),
-        'origin': locations.get(pol_loc_id, 'Unknown'),
-        'destination': locations.get(pod_loc_id, 'Unknown'),
-        'departure_date': route.get('pol', {}).get('date'),
-        'arrival_date': route.get('pod', {}).get('date'),
-        'containers_count': len(data.get('containers', [])),
-        'vessels_count': len(data.get('vessels', [])),
-        'updated_at': metadata.get('updated_at')
-    }
-
-
-def print_summary(summary):
-    """Print formatted summary"""
     print("\n" + "="*60)
     print("TRACKING SUMMARY")
     print("="*60)
-    print(f"BOL Number:   {summary.get('tracking_number', 'N/A')}")
-    print(f"Status:       {summary.get('status', 'N/A')}")
-    print(f"Carrier:      {summary.get('sealine', 'N/A')} ({summary.get('sealine_code', '')})")
-    print(f"Origin:       {summary.get('origin', 'N/A')}")
-    print(f"Destination:  {summary.get('destination', 'N/A')}")
-    print(f"Departure:    {summary.get('departure_date', 'N/A')}")
-    print(f"ETA:          {summary.get('arrival_date', 'N/A')}")
-    print(f"Containers:   {summary.get('containers_count', 0)}")
-    print(f"Vessels:      {summary.get('vessels_count', 0)}")
-    print(f"Last Update:  {summary.get('updated_at', 'N/A')}")
-    print("="*60 + "\n")
-
-
-def load_bol_list(filepath='bol_list.txt'):
-    """Load BOL numbers from file"""
-    bol_numbers = []
+    print(f"BOL Number: {metadata.get('number')}")
+    print(f"Shipping Line: {metadata.get('sealine_name')} ({metadata.get('sealine')})")
+    print(f"Status: {metadata.get('status')}")
+    print(f"Updated: {metadata.get('updated_at')}")
     
-    try:
-        with open(filepath, 'r') as f:
-            for line in f:
-                line = line.strip()
-                # Skip empty lines and comments
-                if line and not line.startswith('#'):
-                    bol_numbers.append(line)
-    except FileNotFoundError:
-        print(f"[!] {filepath} not found")
+    print("\n--- ROUTE ---")
+    print(f"From: {pol.get('name', 'N/A')}, {pol.get('country', '')}")
+    print(f"To: {pod.get('name', 'N/A')}, {pod.get('country', '')}")
+    print(f"ETD: {route.get('pol', {}).get('date', 'N/A')}")
+    print(f"ETA: {route.get('pod', {}).get('date', 'N/A')}")
     
-    return bol_numbers
+    print(f"\n--- CONTAINERS ({len(containers)}) ---")
+    for idx, container in enumerate(containers[:3], 1):
+        print(f"{idx}. {container.get('number')} - {container.get('size_type')} - {container.get('status')}")
+    if len(containers) > 3:
+        print(f"... and {len(containers) - 3} more containers")
+    
+    print("\n--- VESSELS ---")
+    for vessel in vessels:
+        imo = vessel.get('imo') or 'N/A'
+        print(f"- {vessel.get('name')} (IMO: {imo}, Flag: {vessel.get('flag', 'N/A')})")
+    
+    print("="*60)
 
 
 def main():
-    """Main execution"""
-    print("="*60)
-    print("SeaRates Tracking API Scraper")
-    print("="*60)
-    print(f"Started at: {datetime.now().isoformat()}\n")
+    """Main entry point"""
+    # Get tracking number from argument or bol_list.txt
+    if len(sys.argv) > 1:
+        tracking_numbers = [sys.argv[1]]
+    else:
+        try:
+            with open('bol_list.txt', 'r') as f:
+                tracking_numbers = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+        except FileNotFoundError:
+            print("[!] No tracking number provided and bol_list.txt not found")
+            sys.exit(1)
     
     # Get API credentials from environment
-    api_url = os.environ.get('PHP_API_URL', '')
-    api_key = os.environ.get('PHP_API_KEY', '')
+    php_url = os.environ.get('PHP_API_URL', '')
+    php_api_key = os.environ.get('PHP_API_KEY', '')
     
-    if api_url and api_key:
-        print(f"[✓] API endpoint configured")
-    else:
-        print("[!] API credentials not set - will only save locally")
+    print("="*60)
+    print("SeaRates API Scraper - Full API Capture")
+    print("="*60)
+    print(f"Tracking {len(tracking_numbers)} BOL(s)")
     
-    # Get BOL numbers
-    if len(sys.argv) > 1:
-        # Single BOL from command line
-        bol_numbers = [sys.argv[1]]
-        print(f"[+] Tracking single BOL: {sys.argv[1]}")
-    else:
-        # Load from bol_list.txt
-        bol_numbers = load_bol_list()
-        if not bol_numbers:
-            print("[!] No BOL numbers found, using default")
-            bol_numbers = ['3100124492']
+    # Create results directory
+    os.makedirs('results', exist_ok=True)
     
-    print(f"[+] Processing {len(bol_numbers)} BOL(s)\n")
+    success_count = 0
     
-    # Track results
-    results = {
-        'success': [],
-        'failed': [],
-        'api_sent': [],
-        'api_failed': []
-    }
-    
-    # Process each BOL
-    for idx, bol in enumerate(bol_numbers, 1):
+    for tracking_number in tracking_numbers:
         print(f"\n{'='*60}")
-        print(f"[{idx}/{len(bol_numbers)}] Processing BOL: {bol}")
+        print(f"Processing: {tracking_number}")
         print("="*60)
         
-        # Scrape tracking data
-        scrape_result = scrape_searates_api(bol)
+        # Scrape the API
+        api_data = scrape_searates_api(tracking_number)
         
-        # Save locally
-        save_results(bol, scrape_result)
-        
-        if scrape_result.get('success'):
-            results['success'].append(bol)
-            
+        if api_data:
             # Print summary
-            summary = extract_summary(scrape_result['data'])
-            print_summary(summary)
+            print_summary(api_data)
             
-            # Send to API
-            if api_url and api_key:
-                api_result = send_to_api(scrape_result['data'], api_url, api_key)
-                
-                if api_result and not api_result.get('error'):
-                    results['api_sent'].append(bol)
+            # Save to file
+            output_file = f"results/tracking_{tracking_number}_full.json"
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(api_data, f, indent=2, ensure_ascii=False)
+            print(f"\n[✓] Saved to: {output_file}")
+            
+            # Send to PHP API if credentials are set
+            if php_url and php_api_key:
+                if send_to_php_api(api_data, php_url, php_api_key):
+                    print("[✓] Successfully sent to PHP API")
+                    success_count += 1
                 else:
-                    results['api_failed'].append(bol)
+                    print("[✗] Failed to send to PHP API")
+            else:
+                print("[!] PHP API credentials not set - skipping API send")
+                success_count += 1  # Still count as success if file was saved
         else:
-            results['failed'].append(bol)
-            print(f"[✗] Failed: {scrape_result.get('error', 'Unknown error')}")
+            print(f"\n[✗] Failed to scrape: {tracking_number}")
         
-        # Wait between requests to avoid rate limiting
-        if idx < len(bol_numbers):
-            print("\n[+] Waiting 15 seconds before next request...")
-            time.sleep(15)
+        # Wait between requests
+        if len(tracking_numbers) > 1:
+            print("\n[+] Waiting 10 seconds before next request...")
+            time.sleep(10)
     
-    # Final summary
-    print("\n" + "="*60)
-    print("FINAL RESULTS")
-    print("="*60)
-    print(f"Total BOLs:      {len(bol_numbers)}")
-    print(f"Successful:      {len(results['success'])}")
-    print(f"Failed:          {len(results['failed'])}")
-    print(f"API Sent:        {len(results['api_sent'])}")
-    print(f"API Failed:      {len(results['api_failed'])}")
-    
-    if results['failed']:
-        print(f"\nFailed BOLs: {', '.join(results['failed'])}")
-    
-    print("\n" + "="*60)
-    print(f"Completed at: {datetime.now().isoformat()}")
+    print(f"\n{'='*60}")
+    print(f"COMPLETED: {success_count}/{len(tracking_numbers)} successful")
     print("="*60)
     
-    # Exit with error if any failed
-    if results['failed']:
-        sys.exit(1)
-    else:
-        sys.exit(0)
+    # Exit with appropriate code
+    sys.exit(0 if success_count > 0 else 1)
 
 
 if __name__ == "__main__":
