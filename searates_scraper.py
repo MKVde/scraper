@@ -264,7 +264,6 @@ class SeaRatesScraper:
             'note': 'HTML data was captured successfully'
         }
 
-
     def _extract_basic_data(self, sb):
         """Extract all basic tracking information"""
         soup = BeautifulSoup(sb.get_page_source(), 'html.parser')
