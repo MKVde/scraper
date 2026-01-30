@@ -1,49 +1,42 @@
-name: SeaRates Container Tracker
+name: SeaRates Unified Scraper
 
 on:
   schedule:
-    - cron: '0 3 */3 * *'
-  
+    - cron: '0 */6 * * *'  # Every 6 hours
   workflow_dispatch:
     inputs:
       bol_number:
-        description: 'BOL number to track (leave empty to use bol_list.txt)'
+        description: 'BOL number (leave empty for bol_list.txt)'
         required: false
         type: string
-  
   push:
     branches: [ main ]
     paths:
       - 'bol_list.txt'
-      - 'searates_scraper.py'
-      - 'requirements.txt'
+      - 'searates_unified.py'
+
+permissions:
+  contents: write
 
 jobs:
-  scrape-searates:
+  scrape:
     runs-on: ubuntu-latest
     
-    permissions:
-      contents: write
-    
     steps:
-      - name: 📥 Checkout repository
+      - name: 📥 Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       
-      - name: 📝 Prepare BOL list (if provided)
+      - name: 📝 Prepare BOL (if provided)
         if: github.event.inputs.bol_number != ''
-        run: |
-          echo "Tracking BOL: ${{ github.event.inputs.bol_number }}"
-          echo "${{ github.event.inputs.bol_number }}" > bol_list.txt
+        run: echo "${{ github.event.inputs.bol_number }}" > bol_list.txt
       
-      - name: 🐍 Set up Python 3.11
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
       
-      - name: 🌐 Install Google Chrome
+      - name: 🌐 Install Chrome
         run: |
           wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
           sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
@@ -51,105 +44,62 @@ jobs:
           sudo apt-get install -y -qq google-chrome-stable
           google-chrome --version
       
-      - name: 📦 Install Python dependencies
+      - name: 📦 Install Dependencies
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install seleniumbase beautifulsoup4
       
-      - name: 🚀 Run SeaRates scraper
-        run: python searates_scraper.py
+      - name: 🚀 Run Unified Scraper
+        run: python searates_unified.py
       
-      - name: 📡 Send HTML data to PHP API
+      - name: 📊 Display Results Summary
+        if: success()
+        run: |
+          echo "📦 Scraping Summary:"
+          ls -lh data/ | tail -10
+          
+          # Show latest report
+          LATEST_REPORT=$(ls -t data/report_*.txt 2>/dev/null | head -1)
+          if [ -n "$LATEST_REPORT" ]; then
+            echo ""
+            echo "📄 Latest Report:"
+            cat "$LATEST_REPORT"
+          fi
+      
+      - name: 📡 Send to PHP API (optional)
         if: success()
         env:
           PHP_API_URL: ${{ secrets.PHP_API_URL }}
           PHP_API_KEY: ${{ secrets.PHP_API_KEY }}
         run: |
-          if [ -z "$PHP_API_URL" ] || [ -z "$PHP_API_KEY" ]; then
-            echo "⚠️ API credentials not set"
+          if [ -z "$PHP_API_URL" ]; then
+            echo "⚠️  PHP_API_URL not configured"
             exit 0
           fi
           
-          # Find latest HTML file
-          LATEST_HTML=$(ls -t data/searates_html_*.json 2>/dev/null | head -1)
-          
-          if [ -n "$LATEST_HTML" ]; then
-            echo "📤 Sending: $(basename $LATEST_HTML)"
-            
-            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$PHP_API_URL" \
+          # Send latest API file
+          LATEST_API=$(ls -t data/api_full_*.json 2>/dev/null | head -1)
+          if [ -n "$LATEST_API" ]; then
+            echo "📤 Sending: $(basename $LATEST_API)"
+            curl -X POST "$PHP_API_URL" \
               -H "X-API-KEY: $PHP_API_KEY" \
               -H "Content-Type: application/json" \
-              -d @"$LATEST_HTML")
-            
-            HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-            BODY=$(echo "$RESPONSE" | head -n -1)
-            
-            echo "Response: $BODY"
-            echo "HTTP Code: $HTTP_CODE"
-            
-            if [ "$HTTP_CODE" = "200" ]; then
-              echo "✅ Success!"
-            else
-              echo "⚠️ Failed with status $HTTP_CODE"
-            fi
-          else
-            echo "⚠️ No HTML file found"
-          fi
-          
-          # List API files (not sent)
-          echo ""
-          echo "📁 API files saved in repo:"
-          ls -1 data/searates_api_*.json 2>/dev/null | xargs -n1 basename || echo "  (none)"
-      
-      - name: 💾 Commit and push results
-        run: |
-          git config user.name "SeaRates Bot"
-          git config user.email "bot@searates-scraper.github.io"
-          
-          # Pull with rebase
-          echo "🔄 Pulling latest..."
-          git pull --rebase origin main || echo "⚠️ Pull failed"
-          
-          # Add files
-          git add data/ *.png 2>/dev/null || true
-          
-          # Check for changes
-          if git diff --quiet && git diff --staged --quiet; then
-            echo "ℹ️ No changes"
-          else
-            BOL_NUM=$(head -1 bol_list.txt 2>/dev/null || echo "unknown")
-            git commit -m "📊 Update: $(date +'%Y-%m-%d %H:%M') [BOL: $BOL_NUM]"
-            
-            # Retry push
-            for i in 1 2 3; do
-              echo "🚀 Push attempt $i/3..."
-              
-              if git push origin main; then
-                echo "✅ Pushed!"
-                exit 0
-              fi
-              
-              if [ $i -lt 3 ]; then
-                echo "⚠️ Retry in 5s..."
-                sleep 5
-                git pull --rebase origin main || true
-              fi
-            done
-            
-            echo "❌ Push failed after 3 attempts"
-            exit 1
+              -d @"$LATEST_API" \
+              -w "\nHTTP: %{http_code}\n"
           fi
       
-      - name: 📤 Upload artifacts
+      - name: 💾 Commit Results
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "📦 Update tracking: $(date +'%Y-%m-%d %H:%M')"
+          file_pattern: 'data/*.json data/*.txt *.png'
+      
+      - name: 📤 Upload Artifacts
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: scraping-results-${{ github.run_number }}
+          name: unified-results-${{ github.run_number }}
           path: |
             data/
             *.png
           retention-days: 90
-      
-      - name: 📧 Notify on failure
-        if: failure()
-        run: echo "⚠️ Workflow failed! Check logs."

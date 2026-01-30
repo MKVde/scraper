@@ -1,2 +1,3 @@
-seleniumbase>=4.40.0
+seleniumbase>=4.20.0
 beautifulsoup4>=4.12.0
+lxml>=4.9.0
