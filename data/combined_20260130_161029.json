@@ -1,0 +1,145 @@
+{
+  "bols": [
+    {
+      "reference_number": "3100124492",
+      "reference_type": "BL",
+      "status": "In transit",
+      "carrier": "SJHH",
+      "container_count": 8,
+      "container_type": "20' Dry Standard",
+      "origin": "Jebel Ali, AE",
+      "destination": "Djibouti, DJ",
+      "actual_departure": "23 Jan 2026",
+      "actual_arrival": null,
+      "estimated_departure": null,
+      "estimated_arrival": "8 Feb 2026",
+      "coordinates": {
+        "from": [
+          25.00255,
+          55.10811
+        ],
+        "to": [
+          11.58901,
+          43.14503
+        ]
+      },
+      "route_events": [
+        {
+          "location": "Jebel Ali, AE",
+          "description": "Gate Out",
+          "timestamp": "19 Jan 2026 00:00",
+          "is_completed": false
+        },
+        {
+          "location": "Jebel Ali, AE",
+          "description": "Gate In",
+          "timestamp": "22 Jan 2026 00:00",
+          "is_completed": false
+        },
+        {
+          "location": "Jebel Ali, AE",
+          "description": "Loaded",
+          "timestamp": "23 Jan 2026 00:00",
+          "is_completed": false
+        },
+        {
+          "location": "Jeddah, SA",
+          "description": "Vessel arrival at T/S port",
+          "timestamp": "2 Feb 2026 00:00",
+          "is_completed": false
+        },
+        {
+          "location": "Jeddah, SA",
+          "description": "Vessel departure from T/S",
+          "timestamp": "4 Feb 2026 00:00",
+          "is_completed": false
+        },
+        {
+          "location": "Djibouti, DJ",
+          "description": "Vessel arrival at final POD",
+          "timestamp": "8 Feb 2026 00:00",
+          "is_completed": false
+        }
+      ],
+      "vessels": [
+        {
+          "vessel_name": "GFS PERFECT",
+          "voyage": "0074",
+          "loading_port": "Jebel Ali, AE",
+          "discharge_port": "Jeddah, SA",
+          "atd": "23 Jan 2026",
+          "ata": null,
+          "etd": null,
+          "eta": "2 Feb 2026"
+        },
+        {
+          "vessel_name": "FEEDER",
+          "voyage": "JEDJIB2605",
+          "loading_port": "Jeddah, SA",
+          "discharge_port": "Djibouti, DJ",
+          "atd": null,
+          "ata": null,
+          "etd": "4 Feb 2026",
+          "eta": "8 Feb 2026"
+        }
+      ],
+      "containers": [
+        {
+          "container_number": "UETU2899371",
+          "type": null,
+          "size": null,
+          "status": null
+        },
+        {
+          "container_number": "SLVU3015669",
+          "type": null,
+          "size": null,
+          "status": null
+        },
+        {
+          "container_number": "BSIU2922461",
+          "type": null,
+          "size": null,
+          "status": null
+        },
+        {
+          "container_number": "SLVU3018631",
+          "type": null,
+          "size": null,
+          "status": null
+        },
+        {
+          "container_number": "TRHU3505295",
+          "type": null,
+          "size": null,
+          "status": null
+        },
+        {
+          "container_number": "HPCU2386705",
+          "type": null,
+          "size": null,
+          "status": null
+        },
+        {
+          "container_number": "SEKU1072333",
+          "type": null,
+          "size": null,
+          "status": null
+        },
+        {
+          "container_number": "HPCU2474299",
+          "type": null,
+          "size": null,
+          "status": null
+        }
+      ],
+      "scraped_at": "2026-01-30T16:09:58.855483",
+      "screenshot": "searates_3100124492_1769789413.png",
+      "api_response": {
+        "success": false,
+        "error": "Message: invalid argument: log type 'performance' not found\n  (Session info: chrome=144.0.7559.109)\nStacktrace:\n#0 0x55d9678f6afa <unknown>\n#1 0x55d96731060f <unknown>\n#2 0x55d9673a48f6 <unknown>\n#3 0x55d967357842 <unknown>\n#4 0x55d967358631 <unknown>\n#5 0x55d9678bc689 <unknown>\n#6 0x55d9678bf581 <unknown>\n#7 0x55d9678a8ca9 <unknown>\n#8 0x55d9678c013e <unknown>\n#9 0x55d96788f3a0 <unknown>\n#10 0x55d9678e3fc8 <unknown>\n#11 0x55d9678e419b <unknown>\n#12 0x55d9678f5e68 <unknown>\n#13 0x7f127509caa4 <unknown>\n#14 0x7f1275129c6c <unknown>\n"
+      }
+    }
+  ],
+  "total": 1
+}
