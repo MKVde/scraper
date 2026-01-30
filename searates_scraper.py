@@ -33,22 +33,22 @@ class SeaRatesScraper:
                 
                 url = f"https://www.searates.com/container/tracking/?number={bol_number}&sealine={sealine}&shipment-type=sea"
                 
-                print("[1/8] Opening page with Cloudflare bypass...")
+                print("[1/7] Opening page with Cloudflare bypass...")
                 sb.uc_open_with_reconnect(url, reconnect_time=4)
                 
-                print("[2/8] Bypassing Cloudflare challenge...")
+                print("[2/7] Bypassing Cloudflare challenge...")
                 sb.uc_gui_click_captcha()
                 sb.sleep(3)
                 
-                print("[3/8] Waiting for tracking data...")
+                print("[3/7] Waiting for tracking data...")
                 sb.sleep(5)
                 
                 # Extract basic data
-                print("[4/8] Extracting basic tracking information...")
+                print("[4/7] Extracting basic tracking information...")
                 tracking_data = self._extract_basic_data(sb)
                 
                 # Click Vessel tab
-                print("\n[5/8] Switching to Vessel tab...")
+                print("\n[5/7] Switching to Vessel tab...")
                 try:
                     sb.uc_click(f"[data-test-id='openedCard-vessels-tab-{bol_number}']", reconnect_time=2)
                     sb.sleep(3)
@@ -57,7 +57,7 @@ class SeaRatesScraper:
                     print(f"⚠ Could not access Vessel tab: {e}")
                 
                 # Click Containers tab
-                print("\n[6/8] Switching to Containers tab...")
+                print("\n[6/7] Switching to Containers tab...")
                 try:
                     sb.uc_click(f"[data-test-id='openedCard-containers-tab-{bol_number}']", reconnect_time=2)
                     sb.sleep(3)
@@ -66,7 +66,7 @@ class SeaRatesScraper:
                     print(f"⚠ Could not access Containers tab: {e}")
                 
                 # Return to Route tab
-                print("\n[7/8] Returning to Route tab...")
+                print("\n[7/7] Returning to Route tab...")
                 try:
                     sb.uc_click(f"[data-test-id='openedCard-routes-tab-{bol_number}']", reconnect_time=2)
                     sb.sleep(2)
@@ -95,22 +95,16 @@ class SeaRatesScraper:
 
     def capture_api_response(self, bol_number, sealine="AUTO"):
         """
-        Capture XHR API response from tracking-system/reverse/tracking endpoint
-        Uses Chrome DevTools Protocol (CDP) to intercept network requests
+        NEW METHOD: Capture XHR API response using Chrome DevTools Protocol
+        This gets the raw API data that the website uses
         """
         print(f"\n{'='*70}")
         print(f"CAPTURING API RESPONSE: {bol_number}")
         print(f"{'='*70}\n")
         
-        # Enable performance logging for CDP
-        from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
-        
-        caps = DesiredCapabilities.CHROME.copy()
-        caps['goog:loggingPrefs'] = {'performance': 'ALL'}
-        
-        with SB(uc=True, headless=True, xvfb=True, chromium_arg="--enable-logging --v=1") as sb:
+        with SB(uc=True, headless=True, xvfb=True) as sb:
             try:
-                # Enable performance logging
+                # Enable CDP for network monitoring
                 sb.driver.execute_cdp_cmd('Network.enable', {})
                 
                 url = f"https://www.searates.com/container/tracking/?number={bol_number}&sealine={sealine}&shipment-type=sea"
@@ -123,12 +117,9 @@ class SeaRatesScraper:
                 sb.sleep(3)
                 
                 print("[3/4] Waiting for API calls...")
-                sb.sleep(8)  # Wait for all API calls
+                sb.sleep(8)
                 
                 print("[4/4] Extracting API response...")
-                
-                # Target API endpoint pattern
-                target_pattern = f"tracking-system/reverse/tracking"
                 
                 # Get performance logs
                 logs = sb.driver.get_log('performance')
@@ -146,86 +137,52 @@ class SeaRatesScraper:
                             response = params['response']
                             response_url = response['url']
                             
-                            # Check if this matches our target API
-                            if (target_pattern in response_url and 
+                            # Check for our target API
+                            if ('tracking-system/reverse/tracking' in response_url and 
                                 f"number={bol_number}" in response_url and 
-                                "sealine=AUTO" in response_url):
+                                "sealine=AUTO" in response_url and
+                                response.get('status') == 200):
                                 
-                                if response.get('status') == 200:
-                                    target_request_id = params['requestId']
-                                    found_url = response_url
-                                    print(f"✓ Found API: {response_url}")
-                                    break
+                                target_request_id = params['requestId']
+                                found_url = response_url
+                                print(f"✓ Found API: {response_url[:80]}...")
+                                break
                     except:
                         continue
                 
                 # Get response body
                 if target_request_id:
-                    try:
-                        response_body = sb.driver.execute_cdp_cmd('Network.getResponseBody', {
-                            'requestId': target_request_id
-                        })
+                    response_body = sb.driver.execute_cdp_cmd('Network.getResponseBody', {
+                        'requestId': target_request_id
+                    })
+                    
+                    api_data = json.loads(response_body.get('body', ''))
+                    
+                    if api_data.get('status') == 'success':
+                        metadata = api_data.get('data', {}).get('metadata', {})
+                        print(f"✓ API captured successfully!")
+                        print(f"  - Tracking: {metadata.get('number')}")
+                        print(f"  - Status: {metadata.get('status')}")
+                        print(f"  - Containers: {len(api_data.get('data', {}).get('containers', []))}")
                         
-                        body_content = response_body.get('body', '')
-                        api_data = json.loads(body_content)
-                        
-                        # Validate response
-                        if api_data.get('status') == 'success':
-                            print(f"✓ API Response captured successfully!")
-                            metadata = api_data.get('data', {}).get('metadata', {})
-                            print(f"  - Tracking: {metadata.get('number')}")
-                            print(f"  - Line: {metadata.get('sealine_name')}")
-                            print(f"  - Status: {metadata.get('status')}")
-                            print(f"  - Containers: {len(api_data.get('data', {}).get('containers', []))}")
-                            
-                            return {
-                                'success': True,
-                                'api_url': found_url,
-                                'data': api_data,
-                                'captured_at': datetime.now().isoformat()
-                            }
-                        else:
-                            print(f"⚠ API returned non-success status: {api_data.get('status')}")
-                            return {
-                                'success': False,
-                                'error': 'Non-success API status',
-                                'data': api_data
-                            }
-                            
-                    except Exception as e:
-                        print(f"✗ Error extracting API response: {e}")
                         return {
-                            'success': False,
-                            'error': str(e)
+                            'success': True,
+                            'api_url': found_url,
+                            'data': api_data,
+                            'captured_at': datetime.now().isoformat()
                         }
+                    else:
+                        print(f"⚠ API status: {api_data.get('status')}")
+                        return {'success': False, 'error': 'Non-success status', 'data': api_data}
                 else:
-                    print("✗ Target API endpoint not found")
-                    
-                    # Debug: Show captured URLs
-                    print("\n[DEBUG] Captured tracking-related URLs:")
-                    for log in logs[:50]:
-                        try:
-                            message = json.loads(log['message'])['message']
-                            if message.get('method') == 'Network.responseReceived':
-                                url = message['params']['response']['url']
-                                if 'tracking' in url.lower():
-                                    print(f"  - {url}")
-                        except:
-                            continue
-                    
-                    return {
-                        'success': False,
-                        'error': 'API endpoint not found'
-                    }
+                    print("✗ API endpoint not found")
+                    return {'success': False, 'error': 'API not found'}
                     
             except Exception as e:
-                print(f"✗ Unexpected error: {e}")
+                print(f"✗ Error: {e}")
                 import traceback
                 traceback.print_exc()
-                return {
-                    'success': False,
-                    'error': str(e)
-                }
+                return {'success': False, 'error': str(e)}
 
     def _extract_basic_data(self, sb):
         """Extract all basic tracking information"""
@@ -275,7 +232,6 @@ class SeaRatesScraper:
             data['carrier'] = carrier_img.get('alt')
             print(f"   ✓ Carrier: {data['carrier']}")
         
-        # [Rest of the extraction code remains the same...]
         # Extract container count and type
         container_info = soup.find('div', class_=re.compile(r'.*NVumUP.*'))
         if container_info:
@@ -432,7 +388,6 @@ class SeaRatesScraper:
 
 def save_results(data, filename='searates_tracking'):
     """Save results to JSON and TXT"""
-    # Create data directory
     os.makedirs('data', exist_ok=True)
     
     json_file = f"data/{filename}.json"
@@ -464,18 +419,18 @@ def save_results(data, filename='searates_tracking'):
 
 
 def main():
-    # Read BOL numbers from bol_list.txt
+    # Read BOL numbers
     try:
         with open('bol_list.txt', 'r') as f:
             bol_numbers = [line.strip() for line in f if line.strip() and not line.startswith('#')]
     except FileNotFoundError:
-        print("⚠ bol_list.txt not found, using default BOL")
+        print("⚠ bol_list.txt not found")
         bol_numbers = ["3100124492"]
     
     print("\n" + "="*70)
-    print("SEARATES SCRAPER - CLOUDFLARE BYPASS + API CAPTURE")
+    print("SEARATES SCRAPER - HTML + API CAPTURE")
     print("="*70)
-    print(f"Processing {len(bol_numbers)} BOL number(s)\n")
+    print(f"Processing {len(bol_numbers)} BOL(s)\n")
     
     scraper = SeaRatesScraper()
     all_results = []
@@ -483,24 +438,22 @@ def main():
     for bol in bol_numbers:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
-        # Step 1: Scrape HTML data
-        results = scraper.track_bol(bol, "AUTO")
+        # STEP 1: Scrape HTML
+        html_results = scraper.track_bol(bol, "AUTO")
         
-        if 'error' not in results:
+        if 'error' not in html_results:
             print("\n" + "="*70)
-            print(f"SUMMARY - {bol}")
+            print(f"HTML SCRAPE SUMMARY - {bol}")
             print("="*70)
-            print(f"Reference: {results.get('reference_number', 'N/A')}")
-            print(f"Status: {results.get('status', 'N/A')}")
-            print(f"Carrier: {results.get('carrier', 'N/A')}")
-            print(f"Route: {results.get('origin', 'N/A')} → {results.get('destination', 'N/A')}")
-            print(f"Vessels: {len(results.get('vessels', []))}")
-            print(f"Events: {len(results.get('route_events', []))}")
+            print(f"Reference: {html_results.get('reference_number', 'N/A')}")
+            print(f"Status: {html_results.get('status', 'N/A')}")
+            print(f"Carrier: {html_results.get('carrier', 'N/A')}")
+            print(f"Route: {html_results.get('origin', 'N/A')} → {html_results.get('destination', 'N/A')}")
             
-            # Save HTML-scraped data
-            save_results(results, f"searates_html_{bol}_{timestamp}")
+            # Save HTML data
+            save_results(html_results, f"searates_html_{bol}_{timestamp}")
             
-            # Step 2: Capture API response
+            # STEP 2: Capture API
             print("\n" + "="*70)
             print("STEP 2: CAPTURING API RESPONSE")
             print("="*70)
@@ -508,36 +461,32 @@ def main():
             api_response = scraper.capture_api_response(bol, "AUTO")
             
             if api_response.get('success'):
-                # Save API response separately
-                api_filename = f"data/searates_api_{bol}_{timestamp}.json"
-                with open(api_filename, 'w', encoding='utf-8') as f:
+                # Save API response
+                api_file = f"data/searates_api_{bol}_{timestamp}.json"
+                with open(api_file, 'w', encoding='utf-8') as f:
                     json.dump(api_response, f, indent=2, ensure_ascii=False)
-                print(f"\n✓ API Response saved: {api_filename}")
-                
-                # Add API data to results
-                results['api_response'] = api_response
+                print(f"\n✓ API saved: {api_file}")
+                html_results['api_response'] = api_response
             else:
-                print(f"\n⚠ Could not capture API response: {api_response.get('error')}")
-                results['api_response'] = api_response
+                print(f"\n⚠ API capture failed: {api_response.get('error')}")
+                html_results['api_response'] = api_response
             
-            all_results.append(results)
-            print("\n✓ SCRAPING COMPLETED!")
-            
+            all_results.append(html_results)
         else:
-            print(f"\n❌ Failed: {bol} - {results['error']}")
-            all_results.append(results)
+            print(f"\n❌ Failed: {bol}")
+            all_results.append(html_results)
         
         # Wait between BOLs
         if len(bol_numbers) > 1:
-            print("\n⏳ Waiting 10 seconds before next BOL...")
+            print("\n⏳ Waiting 10 seconds...")
             time.sleep(10)
     
-    # Save combined results
+    # Save combined
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     save_results({'bols': all_results, 'total': len(bol_numbers)}, f"combined_{timestamp}")
     
     print("\n" + "="*70)
-    print(f"✓ ALL {len(bol_numbers)} BOL(S) PROCESSED!")
+    print(f"✓ COMPLETED: {len(bol_numbers)} BOL(S)")
     print("="*70)
 
 
