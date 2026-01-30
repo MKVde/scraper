@@ -102,102 +102,159 @@ class SeaRatesScraper:
                     pass
                 return {'error': str(e), 'screenshot': screenshot}
 
-    def _capture_api_from_session(self, sb, bol_number):
+        def _capture_api_from_session(self, sb, bol_number):
         """
         Capture API response from current browser session
-        Uses CDP to get network requests that already happened
+        Uses browser's fetch API to call the endpoint directly
         """
         try:
-            # Try to get network logs via CDP
-            response = sb.driver.execute_cdp_cmd('Network.getResponseBody', {
-                'requestId': 'unknown'  # This might not work, but we'll try alternative
-            })
-            print("   ✓ CDP method available")
-        except:
-            print("   ⚠ CDP getResponseBody not available")
-        
-        # Alternative: Try to get the API data from window object
-        try:
-            # Execute JavaScript to find API data in window or fetch it
-            api_script = """
-            // Try to find the tracking data in window object
-            if (window.__NEXT_DATA__) {
-                return JSON.stringify(window.__NEXT_DATA__);
-            }
-            
-            // Try to find in Redux store
-            if (window.__REDUX_STATE__) {
-                return JSON.stringify(window.__REDUX_STATE__);
-            }
-            
-            // Look for tracking data in global scope
-            const keys = Object.keys(window);
-            for (let key of keys) {
-                if (key.includes('tracking') || key.includes('data')) {
-                    try {
-                        return JSON.stringify(window[key]);
-                    } catch(e) {}
-                }
-            }
-            
-            return null;
-            """
-            
-            window_data = sb.driver.execute_script(api_script)
-            
-            if window_data:
-                print("   ✓ Found data in window object")
-                return {
-                    'success': True,
-                    'source': 'window_object',
-                    'data': json.loads(window_data),
-                    'captured_at': datetime.now().isoformat()
-                }
-        except Exception as e:
-            print(f"   ⚠ Could not extract from window: {e}")
-        
-        # Fallback: Make direct API call using current session cookies
-        try:
-            cookies = sb.driver.get_cookies()
-            cookie_str = '; '.join([f"{c['name']}={c['value']}" for c in cookies])
-            
+            # Method 1: Direct fetch call from browser
             api_url = f"https://www.searates.com/tracking-system/reverse/tracking?route=true&last_successful=false&number={bol_number}&sealine=AUTO"
             
-            # Execute fetch in browser context
+            print(f"   [+] Calling API: {api_url[:60]}...")
+            
+            # Execute fetch in browser context (uses same session/cookies)
             fetch_script = f"""
             return fetch('{api_url}', {{
                 method: 'GET',
                 credentials: 'include',
                 headers: {{
-                    'Accept': 'application/json'
+                    'Accept': 'application/json',
+                    'User-Agent': navigator.userAgent
                 }}
             }})
             .then(response => response.json())
-            .then(data => JSON.stringify(data))
-            .catch(err => null);
+            .then(data => {{
+                return {{
+                    success: true,
+                    data: data
+                }};
+            }})
+            .catch(err => {{
+                return {{
+                    success: false,
+                    error: err.toString()
+                }};
+            }});
             """
             
-            api_response = sb.driver.execute_script(fetch_script)
-            
-            if api_response:
-                api_json = json.loads(api_response) if isinstance(api_response, str) else api_response
+            # Wait for fetch to complete (synchronous execution)
+            api_response = sb.driver.execute_async_script("""
+                const callback = arguments[arguments.length - 1];
+                const apiUrl = arguments[0];
                 
-                if api_json.get('status') == 'success':
-                    metadata = api_json.get('data', {}).get('metadata', {})
-                    print(f"   ✓ API captured via fetch!")
+                fetch(apiUrl, {
+                    method: 'GET',
+                    credentials: 'include',
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                })
+                .then(response => response.json())
+                .then(data => callback({success: true, data: data}))
+                .catch(err => callback({success: false, error: err.toString()}));
+            """, api_url)
+            
+            if api_response and api_response.get('success'):
+                api_data = api_response.get('data')
+                
+                if api_data and api_data.get('status') == 'success':
+                    metadata = api_data.get('data', {}).get('metadata', {})
+                    containers = api_data.get('data', {}).get('containers', [])
+                    
+                    print(f"   ✓ API captured successfully!")
                     print(f"      - Tracking: {metadata.get('number')}")
                     print(f"      - Status: {metadata.get('status')}")
-                    print(f"      - Containers: {len(api_json.get('data', {}).get('containers', []))}")
+                    print(f"      - Containers: {len(containers)}")
+                    print(f"      - Shipping Line: {metadata.get('sealine_name')}")
                     
                     return {
                         'success': True,
                         'source': 'fetch_api',
                         'api_url': api_url,
-                        'data': api_json,
+                        'data': api_data,
                         'captured_at': datetime.now().isoformat()
                     }
+                else:
+                    print(f"   ⚠ API returned unexpected format")
+                    return {
+                        'success': False,
+                        'error': 'Invalid API response format',
+                        'raw_response': api_data
+                    }
+            else:
+                error_msg = api_response.get('error', 'Unknown error') if api_response else 'No response'
+                print(f"   ⚠ Fetch failed: {error_msg}")
+                
         except Exception as e:
-            print(f"   ⚠ Fetch method failed: {e}")
+            print(f"   ⚠ Fetch method error: {e}")
+        
+        # Method 2: Try XMLHttpRequest as fallback
+        try:
+            print("   [+] Trying XMLHttpRequest method...")
+            
+            xhr_script = """
+            return new Promise((resolve) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('GET', arguments[0], true);
+                xhr.setRequestHeader('Accept', 'application/json');
+                
+                xhr.onload = function() {
+                    if (xhr.status === 200) {
+                        try {
+                            resolve({
+                                success: true,
+                                data: JSON.parse(xhr.responseText)
+                            });
+                        } catch(e) {
+                            resolve({
+                                success: false,
+                                error: 'JSON parse error'
+                            });
+                        }
+                    } else {
+                        resolve({
+                            success: false,
+                            error: 'HTTP ' + xhr.status
+                        });
+                    }
+                };
+                
+                xhr.onerror = function() {
+                    resolve({
+                        success: false,
+                        error: 'Network error'
+                    });
+                };
+                
+                xhr.send();
+            });
+            """
+            
+            xhr_response = sb.driver.execute_async_script(
+                "const callback = arguments[arguments.length - 1]; " +
+                "(" + xhr_script + ")(arguments[0]).then(callback);",
+                api_url
+            )
+            
+            if xhr_response and xhr_response.get('success'):
+                api_data = xhr_response.get('data')
+                
+                if api_data and api_data.get('status') == 'success':
+                    metadata = api_data.get('data', {}).get('metadata', {})
+                    print(f"   ✓ XHR method successful!")
+                    print(f"      - Tracking: {metadata.get('number')}")
+                    
+                    return {
+                        'success': True,
+                        'source': 'xhr_api',
+                        'api_url': api_url,
+                        'data': api_data,
+                        'captured_at': datetime.now().isoformat()
+                    }
+                    
+        except Exception as e:
+            print(f"   ⚠ XHR method error: {e}")
         
         # If all methods fail
         print("   ✗ Could not capture API response")
@@ -206,6 +263,7 @@ class SeaRatesScraper:
             'error': 'All capture methods failed',
             'note': 'HTML data was captured successfully'
         }
+
 
     def _extract_basic_data(self, sb):
         """Extract all basic tracking information"""
