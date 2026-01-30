@@ -104,135 +104,131 @@ class SeaRatesScraper:
 
     def _capture_api_from_session(self, sb, bol_number):
         """
-        Capture API response from current browser session
-        Uses browser's fetch API to call the endpoint directly
+        Capture API response that already loaded in the page
+        Extract from browser's internal state instead of making new request
         """
         try:
-            # Method 1: Direct fetch call from browser
-            api_url = f"https://www.searates.com/tracking-system/reverse/tracking?route=true&last_successful=false&number={bol_number}&sealine=AUTO"
+            # Method 1: Extract from window.__NUXT__ or similar global state
+            print("   [+] Checking window objects...")
             
-            print(f"   [+] Calling API: {api_url[:60]}...")
+            window_check_script = """
+            // Check common places where React/Next.js/Nuxt store data
+            const checks = [];
             
-            # Wait for fetch to complete (synchronous execution)
-            api_response = sb.driver.execute_async_script("""
-                const callback = arguments[arguments.length - 1];
-                const apiUrl = arguments[0];
-                
-                fetch(apiUrl, {
-                    method: 'GET',
-                    credentials: 'include',
-                    headers: {
-                        'Accept': 'application/json'
-                    }
-                })
-                .then(response => response.json())
-                .then(data => callback({success: true, data: data}))
-                .catch(err => callback({success: false, error: err.toString()}));
-            """, api_url)
+            // Check __NEXT_DATA__
+            if (window.__NEXT_DATA__) {
+                checks.push({source: '__NEXT_DATA__', data: window.__NEXT_DATA__});
+            }
             
-            if api_response and api_response.get('success'):
-                api_data = api_response.get('data')
-                
-                if api_data and api_data.get('status') == 'success':
-                    metadata = api_data.get('data', {}).get('metadata', {})
-                    containers = api_data.get('data', {}).get('containers', [])
-                    
-                    print(f"   ✓ API captured successfully!")
-                    print(f"      - Tracking: {metadata.get('number')}")
-                    print(f"      - Status: {metadata.get('status')}")
-                    print(f"      - Containers: {len(containers)}")
-                    print(f"      - Shipping Line: {metadata.get('sealine_name')}")
-                    
-                    return {
-                        'success': True,
-                        'source': 'fetch_api',
-                        'api_url': api_url,
-                        'data': api_data,
-                        'captured_at': datetime.now().isoformat()
-                    }
-                else:
-                    print(f"   ⚠ API returned unexpected format")
-                    return {
-                        'success': False,
-                        'error': 'Invalid API response format',
-                        'raw_response': api_data
-                    }
-            else:
-                error_msg = api_response.get('error', 'Unknown error') if api_response else 'No response'
-                print(f"   ⚠ Fetch failed: {error_msg}")
-                
-        except Exception as e:
-            print(f"   ⚠ Fetch method error: {e}")
-        
-        # Method 2: Try XMLHttpRequest as fallback
-        try:
-            print("   [+] Trying XMLHttpRequest method...")
+            // Check __NUXT__
+            if (window.__NUXT__) {
+                checks.push({source: '__NUXT__', data: window.__NUXT__});
+            }
             
-            xhr_response = sb.driver.execute_async_script("""
-                const callback = arguments[arguments.length - 1];
-                const apiUrl = arguments[0];
-                
-                const xhr = new XMLHttpRequest();
-                xhr.open('GET', apiUrl, true);
-                xhr.setRequestHeader('Accept', 'application/json');
-                
-                xhr.onload = function() {
-                    if (xhr.status === 200) {
-                        try {
-                            callback({
-                                success: true,
-                                data: JSON.parse(xhr.responseText)
-                            });
-                        } catch(e) {
-                            callback({
-                                success: false,
-                                error: 'JSON parse error'
-                            });
+            // Check Redux store
+            if (window.__REDUX_DEVTOOLS_EXTENSION__) {
+                try {
+                    const state = window.__REDUX_DEVTOOLS_EXTENSION__.getState();
+                    checks.push({source: 'redux', data: state});
+                } catch(e) {}
+            }
+            
+            // Check for tracking data in data attributes
+            const trackingCards = document.querySelectorAll('[data-tracking-data]');
+            if (trackingCards.length > 0) {
+                try {
+                    const data = JSON.parse(trackingCards[0].getAttribute('data-tracking-data'));
+                    checks.push({source: 'data-attribute', data: data});
+                } catch(e) {}
+            }
+            
+            return checks;
+            """
+            
+            window_data = sb.driver.execute_script(window_check_script)
+            
+            if window_data and len(window_data) > 0:
+                for item in window_data:
+                    print(f"   ✓ Found data in {item['source']}")
+                    # Try to extract tracking data from the structure
+                    extracted = self._extract_tracking_from_window_data(item['data'])
+                    if extracted:
+                        return {
+                            'success': True,
+                            'source': f"window_{item['source']}",
+                            'data': extracted,
+                            'captured_at': datetime.now().isoformat()
                         }
-                    } else {
-                        callback({
-                            success: false,
-                            error: 'HTTP ' + xhr.status
-                        });
-                    }
-                };
-                
-                xhr.onerror = function() {
-                    callback({
-                        success: false,
-                        error: 'Network error'
-                    });
-                };
-                
-                xhr.send();
-            """, api_url)
             
-            if xhr_response and xhr_response.get('success'):
-                api_data = xhr_response.get('data')
-                
-                if api_data and api_data.get('status') == 'success':
-                    metadata = api_data.get('data', {}).get('metadata', {})
-                    print(f"   ✓ XHR method successful!")
-                    print(f"      - Tracking: {metadata.get('number')}")
-                    
-                    return {
-                        'success': True,
-                        'source': 'xhr_api',
-                        'api_url': api_url,
-                        'data': api_data,
-                        'captured_at': datetime.now().isoformat()
+            # Method 2: Parse from page HTML/JSON embedded data
+            print("   [+] Checking embedded JSON...")
+            
+            json_script = """
+            // Look for JSON-LD or embedded JSON in script tags
+            const scripts = document.querySelectorAll('script[type="application/json"]');
+            const jsonData = [];
+            
+            for (let script of scripts) {
+                try {
+                    const data = JSON.parse(script.textContent);
+                    if (data && typeof data === 'object') {
+                        jsonData.push(data);
                     }
-                    
+                } catch(e) {}
+            }
+            
+            return jsonData;
+            """
+            
+            embedded_json = sb.driver.execute_script(json_script)
+            
+            if embedded_json and len(embedded_json) > 0:
+                for data in embedded_json:
+                    if isinstance(data, dict) and 'containers' in str(data).lower():
+                        print(f"   ✓ Found embedded tracking data")
+                        return {
+                            'success': True,
+                            'source': 'embedded_json',
+                            'data': data,
+                            'captured_at': datetime.now().isoformat()
+                        }
+            
+            # Method 3: If all else fails, note that HTML scraping worked
+            print("   ⚠ Could not extract API format")
+            print("   ℹ️ HTML scraping captured all visible data")
+            return {
+                'success': False,
+                'error': 'API format not accessible',
+                'note': 'All tracking data was captured via HTML scraping'
+            }
+            
         except Exception as e:
-            print(f"   ⚠ XHR method error: {e}")
-        
-        # If all methods fail
-        print("   ✗ Could not capture API response")
-        return {
-            'success': False,
-            'error': 'All capture methods failed',
-            'note': 'HTML data was captured successfully'
-        }
+            print(f"   ⚠ Capture error: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'note': 'HTML data captured successfully'
+            }
+
+    def _extract_tracking_from_window_data(self, data):
+        """Helper to extract tracking data from window objects"""
+        try:
+            # Try different possible structures
+            if isinstance(data, dict):
+                # Check if it's the API response format
+                if 'data' in data and 'containers' in data.get('data', {}):
+                    return data
+                
+                # Check nested structures
+                for key in ['props', 'pageProps', 'initialState', 'tracking', 'shipment']:
+                    if key in data:
+                        nested = data[key]
+                        if isinstance(nested, dict) and 'containers' in nested:
+                            return {'status': 'success', 'data': nested}
+            
+            return None
+        except:
+            return None
 
     def _extract_basic_data(self, sb):
         """Extract all basic tracking information"""
