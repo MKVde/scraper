@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
+
 """
-SeaRates Scraper with CDP Network Monitoring + HTML Scraping
-Captures API response AND HTML data for GitHub Actions
+SeaRates Scraper for GitHub Actions
+FIXED: CDP Network monitoring BEFORE page load to capture API response
 """
 
 import os
@@ -12,16 +13,18 @@ import time
 import json
 from datetime import datetime
 import re
+import threading
 
 class SeaRatesScraper:
     def __init__(self):
-        """Initialize scraper"""
+        """Initialize with UC Mode enabled"""
         self.sb = None
-        self.captured_api_data = None
-        
-    def track_bol(self, bol_number, sealine="AUTO"):
-        """Track shipment with API capture + HTML scraping"""
-        
+        self.captured_api_response = None
+
+    def track_bol_with_api(self, bol_number, sealine="AUTO"):
+        """
+        FIXED: Network monitoring BEFORE page load
+        """
         with SB(uc=True, headless=True, xvfb=True) as sb:
             self.sb = sb
             
@@ -31,39 +34,29 @@ class SeaRatesScraper:
                 print(f"SEALINE: {sealine}")
                 print(f"{'='*70}\n")
                 
-                # Build URL
                 url = f"https://www.searates.com/container/tracking/?number={bol_number}&sealine={sealine}&shipment-type=sea"
                 
-                # STEP 1: Enable CDP Network monitoring BEFORE opening page
-                print("[1/8] Enabling CDP Network monitoring...")
-                try:
-                    sb.driver.execute_cdp_cmd('Network.enable', {})
-                    print("   ✓ Network monitoring enabled")
-                except Exception as e:
-                    print(f"   ⚠ CDP not available: {e}")
+                # CRITICAL: Enable CDP Network monitoring FIRST
+                print("[1/9] Enabling CDP Network monitoring...")
+                self._enable_network_capture(sb)
                 
-                # STEP 2: Open page with Cloudflare bypass
-                print("[2/8] Opening page with Cloudflare bypass...")
+                # STEP 2: Open page (network already monitoring)
+                print("[2/9] Opening page with Cloudflare bypass...")
                 sb.uc_open_with_reconnect(url, reconnect_time=4)
                 
-                print("[3/8] Bypassing Cloudflare challenge...")
+                print("[3/9] Bypassing Cloudflare challenge...")
                 sb.uc_gui_click_captcha()
                 sb.sleep(3)
                 
-                # STEP 3: Wait for tracking data + API calls
-                print("[4/8] Waiting for tracking data + API calls...")
-                sb.sleep(6)
+                print("[4/9] Waiting for tracking data + API calls...")
+                sb.sleep(10)  # Give time for API call
                 
-                # STEP 4: Capture API response from CDP
-                print("[5/8] Capturing API response...")
-                self.captured_api_data = self._capture_api_response(sb, bol_number)
-                
-                # STEP 5: Extract HTML data (as before)
-                print("[6/8] Extracting HTML tracking information...")
+                # STEP 3: Extract HTML data
+                print("[5/9] Extracting basic tracking information...")
                 tracking_data = self._extract_basic_data(sb)
                 
-                # Click Vessel tab
-                print("\n[7/8] Switching to Vessel tab...")
+                # STEP 4: Click Vessel tab
+                print("\n[6/9] Switching to Vessel tab...")
                 try:
                     sb.uc_click(f"[data-test-id='openedCard-vessels-tab-{bol_number}']", reconnect_time=2)
                     sb.sleep(3)
@@ -71,8 +64,8 @@ class SeaRatesScraper:
                 except Exception as e:
                     print(f"   ⚠ Could not access Vessel tab: {e}")
                 
-                # Click Containers tab
-                print("\n   Switching to Containers tab...")
+                # STEP 5: Click Containers tab
+                print("\n[7/9] Switching to Containers tab...")
                 try:
                     sb.uc_click(f"[data-test-id='openedCard-containers-tab-{bol_number}']", reconnect_time=2)
                     sb.sleep(3)
@@ -80,25 +73,19 @@ class SeaRatesScraper:
                 except Exception as e:
                     print(f"   ⚠ Could not access Containers tab: {e}")
                 
-                # Return to Route tab
-                try:
-                    sb.uc_click(f"[data-test-id='openedCard-routes-tab-{bol_number}']", reconnect_time=2)
-                    sb.sleep(2)
-                except:
-                    pass
+                # STEP 6: Get captured API response
+                print("\n[8/9] Retrieving captured API response...")
+                api_data = self._get_captured_response(sb)
+                tracking_data['api_response'] = api_data
                 
-                # Screenshot
-                print("[8/8] Taking screenshot...")
+                # STEP 7: Screenshot
+                print("[9/9] Taking screenshot...")
                 screenshot = f"searates_{bol_number}_{int(time.time())}.png"
                 sb.save_screenshot(screenshot)
                 tracking_data['screenshot'] = screenshot
                 print(f"   ✓ Screenshot saved: {screenshot}\n")
                 
-                # Combine HTML + API data
-                return {
-                    'html_data': tracking_data,
-                    'api_data': self.captured_api_data
-                }
+                return tracking_data
                 
             except Exception as e:
                 print(f"\n❌ ERROR: {str(e)}")
@@ -110,90 +97,220 @@ class SeaRatesScraper:
                 except:
                     pass
                 return {'error': str(e), 'screenshot': screenshot}
-    
-    def _capture_api_response(self, sb, bol_number):
-        """Capture API response using CDP Network monitoring"""
-        target_api = "tracking-system/reverse/tracking"
-        
+
+    def _enable_network_capture(self, sb):
+        """
+        Enable CDP Network domain and start capturing responses
+        This MUST run BEFORE opening the page
+        """
         try:
-            # Get network logs via CDP
-            perf_script = """
-            return performance.getEntries()
-                .filter(e => e.name && e.name.includes('tracking-system/reverse/tracking'))
-                .map(e => ({
-                    url: e.name,
-                    duration: e.duration,
-                    startTime: e.startTime
-                }));
+            # Enable Network domain
+            sb.driver.execute_cdp_cmd('Network.enable', {})
+            print("   ✓ CDP Network domain enabled")
+            
+            # Also inject JavaScript interceptor as backup
+            intercept_script = """
+            (function() {
+                console.log('[SEARATES] Installing backup interceptor...');
+                
+                const originalXHR = XMLHttpRequest.prototype.open;
+                const originalSend = XMLHttpRequest.prototype.send;
+                
+                XMLHttpRequest.prototype.open = function(method, url) {
+                    this._url = url;
+                    this._method = method;
+                    return originalXHR.apply(this, arguments);
+                };
+                
+                XMLHttpRequest.prototype.send = function() {
+                    this.addEventListener('load', function() {
+                        if (this._url && this._url.includes('tracking-system/reverse/tracking')) {
+                            try {
+                                const data = JSON.parse(this.responseText);
+                                window.__SEARATES_API__ = data;
+                                console.log('[SEARATES] ✓ Backup captured API');
+                            } catch(e) {}
+                        }
+                    });
+                    return originalSend.apply(this, arguments);
+                };
+                
+                // Also override fetch
+                const originalFetch = window.fetch;
+                window.fetch = function(url, options) {
+                    return originalFetch.apply(this, arguments).then(response => {
+                        if (url.includes('tracking-system/reverse/tracking')) {
+                            response.clone().json().then(data => {
+                                window.__SEARATES_API__ = data;
+                                console.log('[SEARATES] ✓ Backup captured via fetch');
+                            }).catch(e => {});
+                        }
+                        return response;
+                    });
+                };
+                
+                console.log('[SEARATES] ✓ Backup interceptor ready');
+            })();
             """
             
-            entries = sb.driver.execute_script(perf_script)
-            
-            if not entries or len(entries) == 0:
-                print("   ⚠ No API calls found in performance logs")
-                return None
-            
-            print(f"   ✓ Found {len(entries)} API call(s)")
-            api_url = entries[0]['url']
-            print(f"   ✓ API URL: {api_url[:80]}...")
-            
-            # Method 1: Try to fetch from cache
-            print("   [+] Attempting to fetch API response...")
-            
-            fetch_script = f"""
-            var callback = arguments[arguments.length - 1];
-            fetch('{api_url}', {{
-                credentials: 'include',
-                cache: 'force-cache'
-            }})
-            .then(r => r.json())
-            .then(data => callback({{success: true, data: data}}))
-            .catch(e => callback({{success: false, error: e.toString()}}));
-            """
-            
-            result = sb.driver.execute_async_script(fetch_script)
-            
-            if result.get('success') and result.get('data'):
-                api_data = result['data']
-                
-                # Check for rate limit
-                if api_data.get('message') == 'API_KEY_LIMIT_REACHED':
-                    print("   ⚠ SeaRates API rate limit reached (1 search/day)")
-                    print("   ℹ️ HTML data captured successfully")
-                    return {
-                        'status': 'rate_limited',
-                        'message': 'Free tier limit reached',
-                        'raw_response': api_data
-                    }
-                
-                # Success!
-                if api_data.get('status') == 'success':
-                    size = len(json.dumps(api_data))
-                    print(f"   ✓ SUCCESS! Captured API response ({size:,} bytes)")
-                    
-                    # Validate structure
-                    data_section = api_data.get('data', {})
-                    containers = data_section.get('containers', [])
-                    vessels = data_section.get('vessels', [])
-                    
-                    print(f"   ✓ Containers: {len(containers)}")
-                    print(f"   ✓ Vessels: {len(vessels)}")
-                    
-                    return {
-                        'status': 'success',
-                        'source': 'fetch_cache',
-                        'data': api_data,
-                        'size_bytes': size,
-                        'captured_at': datetime.now().isoformat()
-                    }
-            
-            print("   ⚠ Could not fetch API response")
-            return None
+            # Inject before page loads
+            sb.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+                'source': intercept_script
+            })
+            print("   ✓ Backup JavaScript interceptor injected")
             
         except Exception as e:
-            print(f"   ✗ API capture error: {e}")
-            return None
-    
+            print(f"   ⚠ Network monitoring setup failed: {e}")
+
+    def _get_captured_response(self, sb):
+        """
+        Retrieve the captured API response using multiple methods
+        """
+        try:
+            print("   [+] Method 1: Checking JavaScript backup...")
+            
+            # Check JavaScript backup first (most reliable)
+            check_script = "return window.__SEARATES_API__ || null;"
+            api_data = sb.driver.execute_script(check_script)
+            
+            if api_data and isinstance(api_data, dict):
+                if api_data.get('status') == 'success':
+                    size = len(json.dumps(api_data))
+                    print(f"   ✓ SUCCESS! Captured from JavaScript backup ({size:,} bytes)")
+                    return {
+                        'success': True,
+                        'source': 'javascript_backup',
+                        'data': api_data,
+                        'captured_at': datetime.now().isoformat(),
+                        'size_bytes': size
+                    }
+                elif api_data.get('message') == 'API_KEY_LIMIT_REACHED':
+                    print("   ⚠ API rate limit reached")
+                    return {
+                        'success': False,
+                        'error': 'API_KEY_LIMIT_REACHED',
+                        'note': 'Free tier: 1 search/day',
+                        'raw_response': api_data
+                    }
+            
+            # Method 2: Try CDP Network.getResponseBody
+            print("   [+] Method 2: Checking CDP performance logs...")
+            
+            try:
+                # Get performance entries to find request ID
+                perf_script = """
+                return performance.getEntries()
+                    .filter(e => e.name && e.name.includes('tracking-system/reverse/tracking'))
+                    .map(e => ({url: e.name, duration: e.duration}));
+                """
+                entries = sb.driver.execute_script(perf_script)
+                
+                if entries and len(entries) > 0:
+                    print(f"   ✓ Found {len(entries)} API call(s)")
+                    
+                    # Try to get logs (may not work in UC mode)
+                    try:
+                        logs = sb.driver.get_log('performance')
+                        target_request_id = None
+                        
+                        for log in logs:
+                            try:
+                                message = json.loads(log['message'])['message']
+                                if message.get('method') == 'Network.responseReceived':
+                                    params = message['params']
+                                    response = params['response']
+                                    if 'tracking-system/reverse/tracking' in response['url']:
+                                        target_request_id = params['requestId']
+                                        print(f"   ✓ Found request ID: {target_request_id[:20]}...")
+                                        break
+                            except:
+                                continue
+                        
+                        if target_request_id:
+                            response_body = sb.driver.execute_cdp_cmd('Network.getResponseBody', {
+                                'requestId': target_request_id
+                            })
+                            body_content = response_body.get('body', '')
+                            api_data = json.loads(body_content)
+                            
+                            if api_data:
+                                size = len(json.dumps(api_data))
+                                print(f"   ✓ SUCCESS! Captured via CDP ({size:,} bytes)")
+                                return {
+                                    'success': True,
+                                    'source': 'cdp_performance_logs',
+                                    'data': api_data,
+                                    'captured_at': datetime.now().isoformat(),
+                                    'size_bytes': size
+                                }
+                    except Exception as e:
+                        print(f"   ⚠ Performance logs not available: {e}")
+                else:
+                    print("   ⚠ No API calls found in performance entries")
+                    
+            except Exception as e:
+                print(f"   ⚠ CDP method failed: {e}")
+            
+            # Method 3: Try to re-fetch (will use cache/cost 0 calls)
+            print("   [+] Method 3: Attempting cached fetch...")
+            
+            try:
+                # Get the API URL from performance
+                api_url_script = """
+                const entries = performance.getEntries()
+                    .filter(e => e.name && e.name.includes('tracking-system/reverse/tracking'));
+                return entries.length > 0 ? entries[0].name : null;
+                """
+                api_url = sb.driver.execute_script(api_url_script)
+                
+                if api_url:
+                    print(f"   ✓ Found API URL (length: {len(api_url)})")
+                    
+                    # Try async fetch (might be cached)
+                    fetch_script = f"""
+                    var callback = arguments[arguments.length - 1];
+                    fetch('{api_url}', {{
+                        credentials: 'include',
+                        cache: 'force-cache'
+                    }})
+                    .then(r => r.json())
+                    .then(data => callback(data))
+                    .catch(e => callback(null));
+                    """
+                    
+                    api_data = sb.driver.execute_async_script(fetch_script)
+                    
+                    if api_data and isinstance(api_data, dict):
+                        size = len(json.dumps(api_data))
+                        print(f"   ✓ SUCCESS! Fetched from cache ({size:,} bytes)")
+                        return {
+                            'success': True,
+                            'source': 'cached_fetch',
+                            'data': api_data,
+                            'captured_at': datetime.now().isoformat(),
+                            'size_bytes': size
+                        }
+            except Exception as e:
+                print(f"   ⚠ Cached fetch failed: {e}")
+            
+            # All methods failed
+            print("   ✗ All capture methods failed")
+            return {
+                'success': False,
+                'error': 'All capture methods exhausted',
+                'note': 'HTML scraping captured all visible data'
+            }
+            
+        except Exception as e:
+            print(f"   ✗ Capture error: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'success': False,
+                'error': str(e),
+                'note': 'HTML data captured successfully'
+            }
+
     def _extract_basic_data(self, sb):
         """Extract all basic tracking information from HTML"""
         soup = BeautifulSoup(sb.get_page_source(), 'html.parser')
@@ -266,6 +383,20 @@ class SeaRatesScraper:
             data['destination'] = dest_elem.get_text(strip=True)
             print(f"   ✓ Destination: {data['destination']}")
         
+        # Extract coordinates
+        coord_from = soup.find('input', attrs={'name': 'coord_from'})
+        coord_to = soup.find('input', attrs={'name': 'coord_to'})
+        if coord_from and coord_from.get('value'):
+            try:
+                data['coordinates']['from'] = json.loads(coord_from.get('value'))
+            except:
+                pass
+        if coord_to and coord_to.get('value'):
+            try:
+                data['coordinates']['to'] = json.loads(coord_to.get('value'))
+            except:
+                pass
+        
         # Extract dates
         date_section = soup.find('div', class_=re.compile(r'.*tOGj0n.*'))
         if date_section:
@@ -288,7 +419,7 @@ class SeaRatesScraper:
         self._extract_route_events(soup, data)
         
         return data
-    
+
     def _extract_route_events(self, soup, data):
         """Extract route events timeline"""
         location_blocks = soup.find_all('div', class_=re.compile(r'.*CL5ccK.*'))
@@ -322,7 +453,7 @@ class SeaRatesScraper:
                         data['route_events'].append(event)
                         status_icon = "✓" if event['is_completed'] else "○"
                         print(f"     {status_icon} {location}: {event['description']} - {event['timestamp'] or 'Pending'}")
-    
+
     def _extract_vessel_data(self, sb, data):
         """Extract vessel information"""
         soup = BeautifulSoup(sb.get_page_source(), 'html.parser')
@@ -356,13 +487,12 @@ class SeaRatesScraper:
                         vessel[mapping[label]] = value
             
             data['vessels'].append(vessel)
-            
             print(f"   [{idx}] Vessel: {vessel['vessel_name']}")
             print(f"       Voyage: {vessel['voyage']}")
             print(f"       Route: {vessel['loading_port']} → {vessel['discharge_port']}")
             print(f"       Departure: {vessel['atd'] or vessel['etd'] or 'N/A'}")
             print(f"       Arrival: {vessel['ata'] or vessel['eta'] or 'N/A'}\n")
-    
+
     def _extract_containers_data(self, sb, data):
         """Extract container information"""
         soup = BeautifulSoup(sb.get_page_source(), 'html.parser')
@@ -387,76 +517,45 @@ def save_results(data, filename='searates_tracking'):
     """Save results to JSON and TXT"""
     os.makedirs('data', exist_ok=True)
     
-    # Save combined JSON
     json_file = f"data/{filename}.json"
     with open(json_file, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     print(f"\n✓ JSON saved: {json_file}")
     
-    # Save API data separately if available
-    if data.get('api_data') and data['api_data'].get('status') == 'success':
-        api_file = f"data/{filename}_API_FULL.json"
-        with open(api_file, 'w', encoding='utf-8') as f:
-            json.dump(data['api_data']['data'], f, indent=2, ensure_ascii=False)
-        
-        size = data['api_data'].get('size_bytes', 0)
-        print(f"✓ API data saved: {api_file} ({size:,} bytes)")
-    
-    # Save text report
     report_file = f"data/{filename}_report.txt"
-    html_data = data.get('html_data', {})
-    
     with open(report_file, 'w', encoding='utf-8') as f:
         f.write("="*70 + "\n")
         f.write("SEARATES TRACKING REPORT\n")
         f.write("="*70 + "\n\n")
         
-        f.write(f"Reference: {html_data.get('reference_number', 'N/A')}\n")
-        f.write(f"Status: {html_data.get('status', 'N/A')}\n")
-        f.write(f"Carrier: {html_data.get('carrier', 'N/A')}\n")
-        f.write(f"Route: {html_data.get('origin', 'N/A')} → {html_data.get('destination', 'N/A')}\n\n")
+        f.write(f"Reference: {data.get('reference_number', 'N/A')}\n")
+        f.write(f"Status: {data.get('status', 'N/A')}\n")
+        f.write(f"Carrier: {data.get('carrier', 'N/A')}\n")
+        f.write(f"Route: {data.get('origin', 'N/A')} → {data.get('destination', 'N/A')}\n\n")
         
         f.write("VESSELS:\n")
-        for i, v in enumerate(html_data.get('vessels', []), 1):
+        for i, v in enumerate(data.get('vessels', []), 1):
             f.write(f"[{i}] {v.get('vessel_name', 'N/A')} - Voyage {v.get('voyage', 'N/A')}\n")
         
-        f.write("\nCONTAINERS:\n")
-        for i, c in enumerate(html_data.get('containers', []), 1):
-            f.write(f"[{i}] {c.get('container_number', 'N/A')}\n")
-        
         f.write("\nROUTE EVENTS:\n")
-        for i, e in enumerate(html_data.get('route_events', []), 1):
+        for i, e in enumerate(data.get('route_events', []), 1):
             status = "✓" if e.get('is_completed') else "○"
             f.write(f"[{i}] {status} {e.get('location')}: {e.get('description')}\n")
-        
-        # API capture status
-        f.write("\n" + "="*70 + "\n")
-        f.write("API CAPTURE STATUS\n")
-        f.write("="*70 + "\n")
-        
-        api_data = data.get('api_data')
-        if api_data:
-            if api_data.get('status') == 'success':
-                f.write(f"✓ API captured successfully ({api_data.get('size_bytes', 0):,} bytes)\n")
-            elif api_data.get('status') == 'rate_limited':
-                f.write("⚠ API rate limited (HTML data captured)\n")
-        else:
-            f.write("✗ API not captured (HTML data captured)\n")
     
     print(f"✓ Report saved: {report_file}")
 
 
 def main():
-    # Read BOL numbers from bol_list.txt
+    # Read BOL numbers
     try:
         with open('bol_list.txt', 'r') as f:
             bol_numbers = [line.strip() for line in f if line.strip() and not line.startswith('#')]
     except FileNotFoundError:
-        print("⚠ bol_list.txt not found, using default BOL")
+        print("⚠ bol_list.txt not found")
         bol_numbers = ["3100124492"]
     
     print("\n" + "="*70)
-    print("SEARATES SCRAPER - API CAPTURE + HTML SCRAPING")
+    print("SEARATES SCRAPER - FIXED CDP CAPTURE")
     print("="*70)
     print(f"Processing {len(bol_numbers)} BOL(s)\n")
     
@@ -464,44 +563,55 @@ def main():
     all_results = []
     
     for bol in bol_numbers:
-        results = scraper.track_bol(bol, "AUTO")
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # COMBINED: HTML + FULL API in ONE browser session
+        results = scraper.track_bol_with_api(bol, "AUTO")
         
         if 'error' not in results:
-            html_data = results.get('html_data', {})
-            api_data = results.get('api_data', {})
-            
             print("\n" + "="*70)
             print(f"SCRAPE SUMMARY - {bol}")
             print("="*70)
-            print(f"Reference: {html_data.get('reference_number', 'N/A')}")
-            print(f"Status: {html_data.get('status', 'N/A')}")
-            print(f"Carrier: {html_data.get('carrier', 'N/A')}")
-            print(f"Route: {html_data.get('origin', 'N/A')} → {html_data.get('destination', 'N/A')}")
-            print(f"Vessels: {len(html_data.get('vessels', []))}")
-            print(f"Events: {len(html_data.get('route_events', []))}")
-            print(f"Containers: {len(html_data.get('containers', []))}")
+            print(f"Reference: {results.get('reference_number', 'N/A')}")
+            print(f"Status: {results.get('status', 'N/A')}")
+            print(f"Carrier: {results.get('carrier', 'N/A')}")
+            print(f"Route: {results.get('origin', 'N/A')} → {results.get('destination', 'N/A')}")
+            print(f"Vessels: {len(results.get('vessels', []))}")
+            print(f"Events: {len(results.get('route_events', []))}")
+            print(f"Containers: {len(results.get('containers', []))}")
             
-            if api_data and api_data.get('status') == 'success':
-                print(f"API Captured: ✓ YES! ({api_data.get('size_bytes', 0):,} bytes)")
-            elif api_data and api_data.get('status') == 'rate_limited':
-                print(f"API Captured: ⚠ RATE LIMITED")
+            # Check if FULL API was captured
+            api_resp = results.get('api_response', {})
+            if api_resp.get('success'):
+                size = api_resp.get('size_bytes', 0)
+                source = api_resp.get('source', 'unknown')
+                print(f"API Captured: ✓ YES! ({size:,} bytes via {source})")
             else:
-                print(f"API Captured: ✗ NO (HTML data available)")
+                error = api_resp.get('error', 'unknown')
+                print(f"API Captured: ✗ No ({error})")
             
-            # Save results
-            save_results(results, f"searates_{bol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+            # Save HTML data
+            save_results(results, f"searates_html_{bol}_{timestamp}")
+            
+            # Save FULL API data separately if captured
+            if api_resp.get('success') and api_resp.get('data'):
+                api_file = f"data/searates_api_FULL_{bol}_{timestamp}.json"
+                with open(api_file, 'w', encoding='utf-8') as f:
+                    json.dump(api_resp['data'], f, indent=2, ensure_ascii=False)
+                size = len(json.dumps(api_resp['data']))
+                print(f"✓ FULL API saved: {api_file} ({size:,} bytes)")
             
             all_results.append(results)
         else:
-            print(f"\n❌ Failed: {bol} - {results['error']}")
+            print(f"\n❌ Failed: {bol}")
             all_results.append(results)
         
         # Wait between BOLs
         if len(bol_numbers) > 1:
-            print("\n⏳ Waiting 10 seconds before next BOL...")
+            print("\n⏳ Waiting 10 seconds...")
             time.sleep(10)
     
-    # Save combined results
+    # Save combined
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     save_results({'bols': all_results, 'total': len(bol_numbers)}, f"combined_{timestamp}")
     
