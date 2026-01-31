@@ -9,7 +9,7 @@
       "sealine_name": "Pacific International Lines (PIL)",
       "status": "DELIVERED",
       "is_status_from_sealine": false,
-      "from_cache": false,
+      "from_cache": true,
       "updated_at": "2026-01-31 19:44:56",
       "cache_expires": "2026-02-01 01:44:56",
       "api_calls": {
@@ -34,17 +34,6 @@
     "locations": [
       {
         "id": 1,
-        "name": "Jebel Ali",
-        "state": "Dubai",
-        "country": "United Arab Emirates",
-        "country_code": "AE",
-        "locode": "AEJEA",
-        "lat": 25.00255,
-        "lng": 55.10811,
-        "timezone": "Asia/Dubai"
-      },
-      {
-        "id": 2,
         "name": "Berbera",
         "state": "Gobolka Woqooyi Galbeed",
         "country": "Somalia",
@@ -53,22 +42,33 @@
         "lat": 10.43959,
         "lng": 45.01432,
         "timezone": "Africa/Mogadishu"
+      },
+      {
+        "id": 2,
+        "name": "Jebel Ali",
+        "state": "Dubai",
+        "country": "United Arab Emirates",
+        "country_code": "AE",
+        "locode": "AEJEA",
+        "lat": 25.00255,
+        "lng": 55.10811,
+        "timezone": "Asia/Dubai"
       }
     ],
     "facilities": [],
     "route": {
       "prepol": {
-        "location": 1,
+        "location": 2,
         "date": "2025-11-11 03:27:00",
         "actual": true
       },
       "pol": {
-        "location": 1,
+        "location": 2,
         "date": "2025-12-01 00:00:00",
         "actual": true
       },
       "pod": {
-        "location": 2,
+        "location": 1,
         "date": "2025-12-15 00:00:00",
         "actual": true,
         "predictive_eta": null
@@ -100,7 +100,7 @@
         "events": [
           {
             "order_id": 1,
-            "location": 1,
+            "location": 2,
             "facility": null,
             "description": "O/B Empty Container Released",
             "event_type": "SHIPMENT",
@@ -117,7 +117,7 @@
           },
           {
             "order_id": 2,
-            "location": 1,
+            "location": 2,
             "facility": null,
             "description": "Truck Gate In to O/B Terminal",
             "event_type": "EQUIPMENT",
@@ -134,7 +134,7 @@
           },
           {
             "order_id": 3,
-            "location": 1,
+            "location": 2,
             "facility": null,
             "description": "Vessel Loading",
             "event_type": "EQUIPMENT",
@@ -151,7 +151,7 @@
           },
           {
             "order_id": 4,
-            "location": 2,
+            "location": 1,
             "facility": null,
             "description": "Vessel Discharge",
             "event_type": "EQUIPMENT",
