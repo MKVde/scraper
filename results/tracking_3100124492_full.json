@@ -9,9 +9,9 @@
       "sealine_name": "Sealead Shipping",
       "status": "IN_TRANSIT",
       "is_status_from_sealine": false,
-      "from_cache": true,
-      "updated_at": "2026-01-31 04:57:49",
-      "cache_expires": "2026-01-31 10:57:49",
+      "from_cache": false,
+      "updated_at": "2026-01-31 16:54:35",
+      "cache_expires": "2026-01-31 22:54:35",
       "api_calls": {
         "total": 1,
         "used": 1,
@@ -34,6 +34,17 @@
     "locations": [
       {
         "id": 1,
+        "name": "Jebel Ali",
+        "state": "Dubai",
+        "country": "United Arab Emirates",
+        "country_code": "AE",
+        "locode": "AEJEA",
+        "lat": 25.00255,
+        "lng": 55.10811,
+        "timezone": "Asia/Dubai"
+      },
+      {
+        "id": 2,
         "name": "Djibouti",
         "state": "Djibouti Region",
         "country": "Djibouti",
@@ -44,7 +55,7 @@
         "timezone": "Africa/Djibouti"
       },
       {
-        "id": 2,
+        "id": 3,
         "name": "Jeddah",
         "state": "Mecca Region",
         "country": "Saudi Arabia",
@@ -53,17 +64,6 @@
         "lat": 21.49012,
         "lng": 39.18624,
         "timezone": "Asia/Riyadh"
-      },
-      {
-        "id": 3,
-        "name": "Jebel Ali",
-        "state": "Dubai",
-        "country": "United Arab Emirates",
-        "country_code": "AE",
-        "locode": "AEJEA",
-        "lat": 25.00255,
-        "lng": 55.10811,
-        "timezone": "Asia/Dubai"
       },
       {
         "id": 4,
@@ -80,9 +80,9 @@
     "facilities": [
       {
         "id": 1,
-        "name": "DPW Jebel Ali Container Terminal 1",
-        "country_code": null,
-        "locode": null,
+        "name": "DPW Jebel Ali Container Terminal 2",
+        "country_code": "AE",
+        "locode": "AEJEA",
         "bic_code": null,
         "smdg_code": null,
         "lat": null,
@@ -90,9 +90,9 @@
       },
       {
         "id": 2,
-        "name": "DPW Jebel Ali Container Terminal 2",
-        "country_code": "AE",
-        "locode": "AEJEA",
+        "name": "DPW Jebel Ali Container Terminal 1",
+        "country_code": null,
+        "locode": null,
         "bic_code": null,
         "smdg_code": null,
         "lat": null,
@@ -111,23 +111,23 @@
     ],
     "route": {
       "prepol": {
-        "location": 3,
+        "location": 1,
         "date": "2026-01-19 00:00:00",
         "actual": true
       },
       "pol": {
-        "location": 3,
+        "location": 1,
         "date": "2026-01-23 00:00:00",
         "actual": true
       },
       "pod": {
-        "location": 1,
+        "location": 2,
         "date": "2026-02-08 00:00:00",
         "actual": false,
         "predictive_eta": null
       },
       "postpod": {
-        "location": 1,
+        "location": 2,
         "date": "2026-02-08 00:00:00",
         "actual": false
       }
@@ -161,8 +161,8 @@
         "events": [
           {
             "order_id": 1,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Gate Out",
             "event_type": "EQUIPMENT",
             "event_code": "GTOT",
@@ -178,8 +178,8 @@
           },
           {
             "order_id": 2,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Gate In",
             "event_type": "EQUIPMENT",
             "event_code": "GTIN",
@@ -195,8 +195,8 @@
           },
           {
             "order_id": 3,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Loaded",
             "event_type": "EQUIPMENT",
             "event_code": "LOAD",
@@ -212,7 +212,7 @@
           },
           {
             "order_id": 4,
-            "location": 2,
+            "location": 3,
             "facility": null,
             "description": "Vessel arrival at T/S port",
             "event_type": "TRANSPORT",
@@ -229,7 +229,7 @@
           },
           {
             "order_id": 5,
-            "location": 2,
+            "location": 3,
             "facility": null,
             "description": "Vessel departure from T/S",
             "event_type": "TRANSPORT",
@@ -246,7 +246,7 @@
           },
           {
             "order_id": 6,
-            "location": 1,
+            "location": 2,
             "facility": null,
             "description": "Vessel arrival at final POD",
             "event_type": "TRANSPORT",
@@ -273,8 +273,8 @@
         "events": [
           {
             "order_id": 1,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Gate Out",
             "event_type": "EQUIPMENT",
             "event_code": "GTOT",
@@ -290,8 +290,8 @@
           },
           {
             "order_id": 2,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Gate In",
             "event_type": "EQUIPMENT",
             "event_code": "GTIN",
@@ -307,8 +307,8 @@
           },
           {
             "order_id": 3,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Loaded",
             "event_type": "EQUIPMENT",
             "event_code": "LOAD",
@@ -324,7 +324,7 @@
           },
           {
             "order_id": 4,
-            "location": 2,
+            "location": 3,
             "facility": null,
             "description": "Vessel arrival at T/S port",
             "event_type": "TRANSPORT",
@@ -341,7 +341,7 @@
           },
           {
             "order_id": 5,
-            "location": 2,
+            "location": 3,
             "facility": null,
             "description": "Vessel departure from T/S",
             "event_type": "TRANSPORT",
@@ -358,7 +358,7 @@
           },
           {
             "order_id": 6,
-            "location": 1,
+            "location": 2,
             "facility": null,
             "description": "Vessel arrival at final POD",
             "event_type": "TRANSPORT",
@@ -385,8 +385,8 @@
         "events": [
           {
             "order_id": 1,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Gate Out",
             "event_type": "EQUIPMENT",
             "event_code": "GTOT",
@@ -402,8 +402,8 @@
           },
           {
             "order_id": 2,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Gate In",
             "event_type": "EQUIPMENT",
             "event_code": "GTIN",
@@ -419,8 +419,8 @@
           },
           {
             "order_id": 3,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Loaded",
             "event_type": "EQUIPMENT",
             "event_code": "LOAD",
@@ -436,7 +436,7 @@
           },
           {
             "order_id": 4,
-            "location": 2,
+            "location": 3,
             "facility": null,
             "description": "Vessel arrival at T/S port",
             "event_type": "TRANSPORT",
@@ -453,7 +453,7 @@
           },
           {
             "order_id": 5,
-            "location": 2,
+            "location": 3,
             "facility": null,
             "description": "Vessel departure from T/S",
             "event_type": "TRANSPORT",
@@ -470,7 +470,7 @@
           },
           {
             "order_id": 6,
-            "location": 1,
+            "location": 2,
             "facility": null,
             "description": "Vessel arrival at final POD",
             "event_type": "TRANSPORT",
@@ -497,8 +497,8 @@
         "events": [
           {
             "order_id": 1,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Gate Out",
             "event_type": "EQUIPMENT",
             "event_code": "GTOT",
@@ -514,8 +514,8 @@
           },
           {
             "order_id": 2,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Gate In",
             "event_type": "EQUIPMENT",
             "event_code": "GTIN",
@@ -531,8 +531,8 @@
           },
           {
             "order_id": 3,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Loaded",
             "event_type": "EQUIPMENT",
             "event_code": "LOAD",
@@ -548,7 +548,7 @@
           },
           {
             "order_id": 4,
-            "location": 2,
+            "location": 3,
             "facility": null,
             "description": "Vessel arrival at T/S port",
             "event_type": "TRANSPORT",
@@ -565,7 +565,7 @@
           },
           {
             "order_id": 5,
-            "location": 2,
+            "location": 3,
             "facility": null,
             "description": "Vessel departure from T/S",
             "event_type": "TRANSPORT",
@@ -582,7 +582,7 @@
           },
           {
             "order_id": 6,
-            "location": 1,
+            "location": 2,
             "facility": null,
             "description": "Vessel arrival at final POD",
             "event_type": "TRANSPORT",
@@ -609,8 +609,8 @@
         "events": [
           {
             "order_id": 1,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Gate Out",
             "event_type": "EQUIPMENT",
             "event_code": "GTOT",
@@ -626,8 +626,8 @@
           },
           {
             "order_id": 2,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Gate In",
             "event_type": "EQUIPMENT",
             "event_code": "GTIN",
@@ -643,8 +643,8 @@
           },
           {
             "order_id": 3,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Loaded",
             "event_type": "EQUIPMENT",
             "event_code": "LOAD",
@@ -660,7 +660,7 @@
           },
           {
             "order_id": 4,
-            "location": 2,
+            "location": 3,
             "facility": null,
             "description": "Vessel arrival at T/S port",
             "event_type": "TRANSPORT",
@@ -677,7 +677,7 @@
           },
           {
             "order_id": 5,
-            "location": 2,
+            "location": 3,
             "facility": null,
             "description": "Vessel departure from T/S",
             "event_type": "TRANSPORT",
@@ -694,7 +694,7 @@
           },
           {
             "order_id": 6,
-            "location": 1,
+            "location": 2,
             "facility": null,
             "description": "Vessel arrival at final POD",
             "event_type": "TRANSPORT",
@@ -721,8 +721,8 @@
         "events": [
           {
             "order_id": 1,
-            "location": 3,
-            "facility": 1,
+            "location": 1,
+            "facility": 2,
             "description": "Gate Out",
             "event_type": "EQUIPMENT",
             "event_code": "GTOT",
@@ -755,8 +755,8 @@
           },
           {
             "order_id": 3,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Loaded",
             "event_type": "EQUIPMENT",
             "event_code": "LOAD",
@@ -772,7 +772,7 @@
           },
           {
             "order_id": 4,
-            "location": 2,
+            "location": 3,
             "facility": null,
             "description": "Vessel arrival at T/S port",
             "event_type": "TRANSPORT",
@@ -789,7 +789,7 @@
           },
           {
             "order_id": 5,
-            "location": 2,
+            "location": 3,
             "facility": null,
             "description": "Vessel departure from T/S",
             "event_type": "TRANSPORT",
@@ -806,7 +806,7 @@
           },
           {
             "order_id": 6,
-            "location": 1,
+            "location": 2,
             "facility": null,
             "description": "Vessel arrival at final POD",
             "event_type": "TRANSPORT",
@@ -833,8 +833,8 @@
         "events": [
           {
             "order_id": 1,
-            "location": 3,
-            "facility": 1,
+            "location": 1,
+            "facility": 2,
             "description": "Gate Out",
             "event_type": "EQUIPMENT",
             "event_code": "GTOT",
@@ -867,8 +867,8 @@
           },
           {
             "order_id": 3,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Loaded",
             "event_type": "EQUIPMENT",
             "event_code": "LOAD",
@@ -884,7 +884,7 @@
           },
           {
             "order_id": 4,
-            "location": 2,
+            "location": 3,
             "facility": null,
             "description": "Vessel arrival at T/S port",
             "event_type": "TRANSPORT",
@@ -901,7 +901,7 @@
           },
           {
             "order_id": 5,
-            "location": 2,
+            "location": 3,
             "facility": null,
             "description": "Vessel departure from T/S",
             "event_type": "TRANSPORT",
@@ -918,7 +918,7 @@
           },
           {
             "order_id": 6,
-            "location": 1,
+            "location": 2,
             "facility": null,
             "description": "Vessel arrival at final POD",
             "event_type": "TRANSPORT",
@@ -945,8 +945,8 @@
         "events": [
           {
             "order_id": 1,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Gate Out",
             "event_type": "EQUIPMENT",
             "event_code": "GTOT",
@@ -962,8 +962,8 @@
           },
           {
             "order_id": 2,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Gate In",
             "event_type": "EQUIPMENT",
             "event_code": "GTIN",
@@ -979,8 +979,8 @@
           },
           {
             "order_id": 3,
-            "location": 3,
-            "facility": 2,
+            "location": 1,
+            "facility": 1,
             "description": "Loaded",
             "event_type": "EQUIPMENT",
             "event_code": "LOAD",
@@ -996,7 +996,7 @@
           },
           {
             "order_id": 4,
-            "location": 2,
+            "location": 3,
             "facility": null,
             "description": "Vessel arrival at T/S port",
             "event_type": "TRANSPORT",
@@ -1013,7 +1013,7 @@
           },
           {
             "order_id": 5,
-            "location": 2,
+            "location": 3,
             "facility": null,
             "description": "Vessel departure from T/S",
             "event_type": "TRANSPORT",
@@ -1030,7 +1030,7 @@
           },
           {
             "order_id": 6,
-            "location": 1,
+            "location": 2,
             "facility": null,
             "description": "Vessel arrival at final POD",
             "event_type": "TRANSPORT",
@@ -1365,8 +1365,8 @@
               42.5092
             ],
             [
-              14.52624174487539,
-              42.16050423472012
+              16.07557342768769,
+              41.36677478618398
             ],
             [
               21.0097,
@@ -1574,8 +1574,8 @@
         }
       ],
       "pin": [
-        14.52624174487539,
-        42.16050423472012
+        16.07557342768769,
+        41.36677478618398
       ]
     }
   }
