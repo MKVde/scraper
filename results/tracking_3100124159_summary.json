@@ -2,12 +2,12 @@
   "tracking_number": "3100124159",
   "shipping_line": "Sealead Shipping",
   "status": "IN_TRANSIT",
-  "updated_at": "2026-02-01 17:37:26",
+  "updated_at": "2026-02-02 10:53:19",
   "route": {
     "origin": "Jebel Ali, United Arab Emirates",
     "departure_date": null,
     "destination": "Djibouti, Djibouti",
-    "eta": "2026-02-01 00:00:00",
+    "eta": "2026-02-04 00:00:00",
     "eta_predictive": null
   },
   "containers": [
@@ -17,47 +17,7 @@
       "status": "IN_TRANSIT",
       "latest_event": {
         "description": "Vessel arrival at final POD",
-        "date": "2026-02-01 00:00:00",
-        "location": "Djibouti, Djibouti"
-      }
-    },
-    {
-      "number": "CAAU2402482",
-      "type": "20' Dry Standard",
-      "status": "IN_TRANSIT",
-      "latest_event": {
-        "description": "Vessel arrival at final POD",
-        "date": "2026-02-01 00:00:00",
-        "location": "Djibouti, Djibouti"
-      }
-    },
-    {
-      "number": "CULU1925660",
-      "type": "20' Dry Standard",
-      "status": "IN_TRANSIT",
-      "latest_event": {
-        "description": "Vessel arrival at final POD",
-        "date": "2026-02-01 00:00:00",
-        "location": "Djibouti, Djibouti"
-      }
-    },
-    {
-      "number": "TGCU2464904",
-      "type": "20' Dry Standard",
-      "status": "IN_TRANSIT",
-      "latest_event": {
-        "description": "Vessel arrival at final POD",
-        "date": "2026-02-01 00:00:00",
-        "location": "Djibouti, Djibouti"
-      }
-    },
-    {
-      "number": "MXCU0011893",
-      "type": "20' Dry Standard",
-      "status": "IN_TRANSIT",
-      "latest_event": {
-        "description": "Vessel arrival at final POD",
-        "date": "2026-02-01 00:00:00",
+        "date": "2026-02-04 00:00:00",
         "location": "Djibouti, Djibouti"
       }
     },
@@ -67,7 +27,37 @@
       "status": "IN_TRANSIT",
       "latest_event": {
         "description": "Vessel arrival at final POD",
-        "date": "2026-02-01 00:00:00",
+        "date": "2026-02-04 00:00:00",
+        "location": "Djibouti, Djibouti"
+      }
+    },
+    {
+      "number": "CAAU2402482",
+      "type": "20' Dry Standard",
+      "status": "IN_TRANSIT",
+      "latest_event": {
+        "description": "Vessel arrival at final POD",
+        "date": "2026-02-04 00:00:00",
+        "location": "Djibouti, Djibouti"
+      }
+    },
+    {
+      "number": "CULU1925660",
+      "type": "20' Dry Standard",
+      "status": "IN_TRANSIT",
+      "latest_event": {
+        "description": "Vessel arrival at final POD",
+        "date": "2026-02-04 00:00:00",
+        "location": "Djibouti, Djibouti"
+      }
+    },
+    {
+      "number": "TGCU2464904",
+      "type": "20' Dry Standard",
+      "status": "IN_TRANSIT",
+      "latest_event": {
+        "description": "Vessel arrival at final POD",
+        "date": "2026-02-04 00:00:00",
         "location": "Djibouti, Djibouti"
       }
     },
@@ -77,7 +67,17 @@
       "status": "IN_TRANSIT",
       "latest_event": {
         "description": "Vessel arrival at final POD",
-        "date": "2026-02-01 00:00:00",
+        "date": "2026-02-04 00:00:00",
+        "location": "Djibouti, Djibouti"
+      }
+    },
+    {
+      "number": "MXCU0011893",
+      "type": "20' Dry Standard",
+      "status": "IN_TRANSIT",
+      "latest_event": {
+        "description": "Vessel arrival at final POD",
+        "date": "2026-02-04 00:00:00",
         "location": "Djibouti, Djibouti"
       }
     },
@@ -87,7 +87,7 @@
       "status": "IN_TRANSIT",
       "latest_event": {
         "description": "Vessel arrival at final POD",
-        "date": "2026-02-01 00:00:00",
+        "date": "2026-02-04 00:00:00",
         "location": "Djibouti, Djibouti"
       }
     }
@@ -99,9 +99,9 @@
       "flag": "SG"
     },
     {
-      "name": "FEEDER",
-      "imo": null,
-      "flag": null
+      "name": "BANYAS 2",
+      "imo": 9242572,
+      "flag": "PA"
     }
   ],
   "total_containers": 8
