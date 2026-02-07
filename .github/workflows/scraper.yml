@@ -146,8 +146,9 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           # List runs and delete them in parallel (up to 10 at a time)
-          gh run list --repo "$REPO" --limit 500 --json databaseId --jq '.[].databaseId' | grep -v "${{ github.run_id }}" | xargs -n 1 -P 10 -I {} gh run delete {} --repo "$REPO" || true
+          # Note: 'grep -v' prevents deleting the current run prematurely
+          gh run list --repo "$REPO" --limit 500 --json databaseId --jq '.[].databaseId' | grep -v "${{ github.run_id }}" | xargs -P 10 -I {} gh run delete {} --repo "$REPO" || true
           
-          echo "💀 Deleting THIS run (${{ github.run_id }}) now..."
+          echo "💀 Self-destructing: Deleting THIS run (${{ github.run_id }}) now..."
           gh api -X DELETE "repos/$REPO/actions/runs/${{ github.run_id }}"
 
