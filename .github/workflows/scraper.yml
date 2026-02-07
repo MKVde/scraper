@@ -138,3 +138,13 @@ jobs:
           name: tracking-results-${{ github.run_number }}
           path: results/
           retention-days: 90
+      
+      - name: 🧹 Delete all workflow runs
+        if: always()
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 0
+          keep_minimum_runs: 0
+
