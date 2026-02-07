@@ -141,10 +141,12 @@ jobs:
       
       - name: 🧹 Delete all workflow runs
         if: always()
-        uses: Mattraks/delete-workflow-runs@v2
-        with:
-          token: ${{ secrets.GH_PAT }}
-          repository: ${{ github.repository }}
-          retain_days: 0
-          keep_minimum_runs: 0
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "Listing all runs for $REPO..."
+          # List runs and delete them in parallel (up to 10 at a time)
+          gh run list --repo "$REPO" --limit 500 --json databaseId --jq '.[].databaseId' | xargs -n 1 -P 10 -I {} gh run delete {} --repo "$REPO" || true
+          echo "✅ All runs deleted."
 
