@@ -161,19 +161,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_PAT }}
           REPO: ${{ github.repository }}
         run: |
-          # 1. Force Login with the Secret Token
-          echo "$GH_TOKEN" | gh auth login --with-token
-          
-          # 2. Check & Print Token Permissions (Crucial Debugging)
+          # 1. Check Token Status (Just to be sure)
           echo "👇 VERIFYING TOKEN SCOPES 👇"
           gh auth status
-          echo "👆 IF THIS SAYS 'read-only', YOUR TOKEN IS WRONG! 👆"
 
-          # 3. Delete Old Runs (Parallel)
+          # 2. Delete Old Runs (Parallel)
           echo "Listing all runs for $REPO..."
           gh run list --repo "$REPO" --limit 500 --json databaseId --jq '.[].databaseId' | grep -v "${{ github.run_id }}" | xargs -P 10 -I {} gh run delete {} --repo "$REPO" || true
           
-          # 4. Self-Destruct (Delete THIS run)
+          # 3. Self-Destruct (Delete THIS run)
           echo "💀 Self-destructing: Deleting THIS run (${{ github.run_id }}) now..."
           gh api -X DELETE "repos/$REPO/actions/runs/${{ github.run_id }}"
 
