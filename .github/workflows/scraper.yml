@@ -139,6 +139,22 @@ jobs:
           path: results/
           retention-days: 90
       
+      - name: 🔍 Debug Token & Scopes
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "❌ ERROR: GH_PAT secret is EMPTY or MISSING!"
+            echo "Please go to Settings > Secrets > Actions and ensure 'GH_PAT' is created."
+            exit 1
+          else
+            echo "✅ GH_PAT secret is found."
+          fi
+          
+          echo "Checking Token Scopes..."
+          gh auth status
+      
       - name: 🧹 Delete all workflow runs
         if: always()
         env:
