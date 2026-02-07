@@ -102,42 +102,10 @@ jobs:
             echo "⚠️ No full JSON file found"
           fi
       
-      - name: Commit and push results
-        run: |
-          git config user.name "SeaRates Bot"
-          git config user.email "bot@searates-scraper.github.io"
-          
-          # Pull with rebase to avoid conflicts
-          git pull --rebase origin main || echo "⚠️ Pull failed, trying to continue..."
-          
-          git add results/
-          
-          if git diff --quiet && git diff --staged --quiet; then
-            echo "ℹ️ No changes"
-          else
-            git commit -m "📦 Update tracking data: $(date +'%Y-%m-%d %H:%M:%S') [BOL: ${{ github.event.inputs.bol_number }}]"
-            
-            # Robust push with retries
-            for i in 1 2 3; do
-              if git push origin main; then
-                echo "✅ Pushed!"
-                exit 0
-              fi
-              echo "⚠️ Push failed, retrying ($i/3)..."
-              sleep 5
-              git pull --rebase origin main || true
-            done
-            exit 1
-          fi
-        continue-on-error: true
-      
-      - name: Upload artifacts (backup)
-        uses: actions/upload-artifact@v4
+      - name: 🧹 Clean up results directory
         if: always()
-        with:
-          name: tracking-results-${{ github.run_number }}
-          path: results/
-          retention-days: 90
+        run: rm -rf results/*
+
       
 
 
