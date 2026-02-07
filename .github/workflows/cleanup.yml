@@ -1,7 +1,6 @@
-name: Cleanup Runs
 on:
   workflow_run:
-    workflows: ["SeaRates Scraper"]
+    workflows: ["Data Pipeline"]
     types:
       - completed
 

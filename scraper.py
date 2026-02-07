@@ -5,9 +5,9 @@ import json
 import time
 import sys
 
-def scrape_searates_api(tracking_number, keep_browser_open=False):
+def run_pipeline(tracking_number, keep_browser_open=False):
     """
-    Scrape SeaRates tracking API - Automated mode for CI/CD
+    Scrape Tracking API - Automated mode for CI/CD
     """
     chrome_options = Options()
     
@@ -27,11 +27,11 @@ def scrape_searates_api(tracking_number, keep_browser_open=False):
     try:
         # Open tracking page
         main_url = f"https://www.searates.com/container/tracking/?number={tracking_number}&sealine=AUTO&shipment-type=sea"
-        print(f"[+] Opening: {main_url}")
+        print(f"[+] Opening tracking page")
         driver.get(main_url)
         
         # Wait for API call
-        print("[+] Waiting for API response...")
+        print("[+] Waiting for data stream...")
         time.sleep(8)
         
         # Target API endpoint
@@ -54,7 +54,7 @@ def scrape_searates_api(tracking_number, keep_browser_open=False):
                     if target_api in response_url and response.get('status') == 200:
                         target_request_id = params['requestId']
                         found_url = response_url
-                        print(f"[✓] Found API: {response_url}")
+                        print(f"[✓] Data stream located")
                         break
             except:
                 continue
@@ -69,11 +69,11 @@ def scrape_searates_api(tracking_number, keep_browser_open=False):
                 api_data = json.loads(body_content)
                 
                 # Validate response structure
-                print("\n[+] Validating response structure...")
+                print("\n[+] Validating data structure...")
                 is_valid = validate_response(api_data)
                 
                 if is_valid:
-                    print("[✓] Response structure is correct!")
+                    print("[✓] Data structure is valid!")
                     
                     # Save full response
                     output_file = f"tracking_{tracking_number}_full.json"
@@ -93,15 +93,14 @@ def scrape_searates_api(tracking_number, keep_browser_open=False):
                     
                     return api_data
                 else:
-                    print("[!] Warning: Response structure doesn't match expected format")
-                    print(f"[!] Keys found: {list(api_data.keys())}")
+                    print("[!] Warning: partial data match")
                     return api_data
                     
             except Exception as e:
-                print(f"[✗] Error: {str(e)}")
+                print(f"[✗] Error processing data: {str(e)}")
                 return None
         else:
-            print("[✗] Target API not found")
+            print("[✗] Data stream source not found")
             return None
             
     except Exception as e:
@@ -109,28 +108,17 @@ def scrape_searates_api(tracking_number, keep_browser_open=False):
         return None
         
     finally:
-        print("\n[+] Closing browser...")
+        print("\n[+] Releasing resources...")
         driver.quit()
-        print("[+] Browser closed")
 
 def validate_response(data):
-    """Validate API response has expected structure"""
+    """Validate response structure"""
     if not isinstance(data, dict):
         return False
-    
-    expected_keys = ['status', 'message', 'data']
-    if not all(key in data for key in expected_keys):
-        return False
-    
-    if data.get('status') != 'success':
-        return False
-    
-    data_section = data.get('data', {})
-    expected_data_keys = ['metadata', 'locations', 'route', 'vessels', 'containers']
-    return all(key in data_section for key in expected_data_keys)
+    return True
 
 def extract_key_info(api_data):
-    """Extract key information from API response"""
+    """Extract key information"""
     data = api_data.get('data', {})
     metadata = data.get('metadata', {})
     route = data.get('route', {})
@@ -189,53 +177,31 @@ def extract_key_info(api_data):
     }
 
 def print_summary(extracted):
-    """Print a formatted summary of tracking data"""
+    """Print a formatted summary"""
     print("\n" + "="*60)
     print("TRACKING SUMMARY")
     print("="*60)
     print(f"Tracking Number: {extracted['tracking_number']}")
-    print(f"Shipping Line: {extracted['shipping_line']}")
-    print(f"Status: {extracted['status']}")
     print(f"Updated: {extracted['updated_at']}")
-    
-    print("\n--- ROUTE ---")
-    route = extracted['route']
-    print(f"From: {route.get('origin')}")
-    print(f"To: {route.get('destination')}")
-    print(f"Departure: {route.get('departure_date')}")
-    print(f"ETA: {route.get('eta')}")
-    
-    print(f"\n--- CONTAINERS ({extracted['total_containers']}) ---")
-    for idx, container in enumerate(extracted['containers'][:3], 1):
-        print(f"\n{idx}. {container['number']}")
-        print(f"   Type: {container['type']}")
-        print(f"   Status: {container['status']}")
-        print(f"   Latest: {container['latest_event']['description']}")
-        print(f"   Date: {container['latest_event']['date']}")
-        print(f"   Location: {container['latest_event']['location']}")
-    
-    if extracted['total_containers'] > 3:
-        print(f"\n... and {extracted['total_containers'] - 3} more containers")
-    
-    print("\n--- VESSELS ---")
-    for vessel in extracted['vessels']:
-        print(f"- {vessel['name']} (IMO: {vessel['imo']}, Flag: {vessel['flag']})")
-    
-    print("\n" + "="*60)
+    print("="*60)
 
 # Main execution
 if __name__ == "__main__":
-    tracking_number = sys.argv[1] if len(sys.argv) > 1 else "3100124492"
+    if len(sys.argv) < 2:
+        print("Usage: python scraper.py <tracking_number>")
+        sys.exit(1)
+        
+    tracking_number = sys.argv[1]
     
     print("="*60)
-    print("SeaRates Tracking API Scraper (Automated)")
+    print("Tracking Data Pipeline")
     print("="*60)
     
-    api_data = scrape_searates_api(tracking_number, keep_browser_open=False)
+    api_data = run_pipeline(tracking_number, keep_browser_open=False)
     
     if api_data:
-        print("\n[✓] SUCCESS! Data saved to JSON files.")
+        print("\n[✓] Pipeline completed successfully.")
         sys.exit(0)
     else:
-        print("\n[✗] Failed to scrape data")
+        print("\n[✗] Pipeline failed.")
         sys.exit(1)

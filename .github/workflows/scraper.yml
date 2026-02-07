@@ -1,12 +1,12 @@
-name: SeaRates Scraper
+name: Data Pipeline
 
 on:
   workflow_dispatch:
     inputs:
-      bol_number:
-        description: 'BOL number to track'
+      id:
+        description: 'Tracking ID'
         required: true
-        default: '3100124492'
+        default: ''
   schedule:
     - cron: '0 8 * * *'
 
@@ -39,13 +39,13 @@ jobs:
       - name: Create results directory
         run: mkdir -p results
       
-      - name: Run scraper
+      - name: Run pipeline
         run: |
-          # Use the bol_number input that your app sends
-          TRACKING_NUM="${{ github.event.inputs.bol_number || '3100124492' }}"
-          echo "Tracking BOL: $TRACKING_NUM"
+          # Use the input ID
+          TRACKING_NUM="${{ github.event.inputs.id || 'DEMO' }}"
+          echo "Processing ID: $TRACKING_NUM"
           
-          python searates_scraper.py "$TRACKING_NUM"
+          python scraper.py "$TRACKING_NUM"
           
           # Move results to results directory
           mv tracking_*.json results/ 2>/dev/null || true
