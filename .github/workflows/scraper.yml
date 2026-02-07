@@ -139,37 +139,5 @@ jobs:
           path: results/
           retention-days: 90
       
-      - name: 🔍 Debug Token & Scopes
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "❌ ERROR: GH_PAT secret is EMPTY or MISSING!"
-            echo "Please go to Settings > Secrets > Actions and ensure 'GH_PAT' is created."
-            exit 1
-          else
-            echo "✅ GH_PAT secret is found."
-          fi
-          
-          echo "Checking Token Scopes..."
-          gh auth status
-      
-      - name: 🧹 Delete all workflow runs
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-          REPO: ${{ github.repository }}
-        run: |
-          # 1. Check Token Status (Just to be sure)
-          echo "👇 VERIFYING TOKEN SCOPES 👇"
-          gh auth status
 
-          # 2. Delete Old Runs (Parallel)
-          echo "Listing all runs for $REPO..."
-          gh run list --repo "$REPO" --limit 500 --json databaseId --jq '.[].databaseId' | grep -v "${{ github.run_id }}" | xargs -P 10 -I {} gh run delete {} --repo "$REPO" || true
-          
-          # 3. Self-Destruct (Delete THIS run)
-          echo "💀 Self-destructing: Deleting THIS run (${{ github.run_id }}) now..."
-          gh api -X DELETE "repos/$REPO/actions/runs/${{ github.run_id }}"
 
