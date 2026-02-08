@@ -71,8 +71,8 @@ jobs:
             RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$PHP_API_URL" \
               -H "X-API-KEY: $PHP_API_KEY" \
               -H "Content-Type: application/json" \
-              --connect-timeout 30 \
-              --max-time 60 \
+              --connect-timeout 60 \
+              --max-time 300 \
               --retry 2 \
               --retry-delay 5 \
               -d @"$LATEST_JSON")
